@@ -7,7 +7,7 @@ import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
-    // Ensure the API key is set in Netlify's environment variables
+    // Ensure the Gemini API key is set in Netlify's environment variables
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
         return {
@@ -15,6 +15,25 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             body: JSON.stringify({ error: "API_KEY is not configured on the server." }),
         };
     }
+
+    // --- AUTHENTICATION GATING ---
+    // This checks for a secret key sent from the client to prevent abuse.
+    const serverSecret = process.env.CLIENT_SECRET;
+    if (!serverSecret) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "CLIENT_SECRET is not configured on the server. Auth gating is required." }),
+        };
+    }
+
+    const clientSecret = event.headers['x-client-secret'];
+    if (!clientSecret || clientSecret !== serverSecret) {
+        return {
+            statusCode: 403,
+            body: JSON.stringify({ error: "Forbidden: Invalid or missing client secret." }),
+        };
+    }
+    // --- END AUTHENTICATION GATING ---
 
     // Extract the path from the request URL (e.g., /v1beta/models/...)
     // The path is everything after '/api-proxy/'

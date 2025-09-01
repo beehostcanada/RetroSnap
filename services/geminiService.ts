@@ -3,6 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 
+// --- IMPORTANT SECURITY CONFIGURATION ---
+// To protect your Gemini API key from abuse, you must set up a client secret.
+// 1. Generate a strong, random string (e.g., using a password manager).
+// 2. Replace the placeholder value below with your generated secret.
+// 3. Go to your Netlify project > Site configuration > Build & deploy > Environment variables.
+// 4. Add an environment variable named `CLIENT_SECRET` and set its value to the *same* secret string.
+const CLIENT_SECRET = "sk-my-super-secret-retro-app-key-12345";
+
+
 // --- Minimal Type Definitions to avoid @google/genai runtime dependencies ---
 interface Part {
     text?: string;
@@ -74,6 +83,10 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+            if (CLIENT_SECRET.startsWith("__REPLACE_ME")) {
+                throw new Error("Client secret is not configured. Please edit services/geminiService.ts to set a secret key.");
+            }
+        
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
@@ -81,6 +94,7 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Client-Secret': CLIENT_SECRET,
                 },
                 body: bodyString,
                 signal: controller.signal,
@@ -96,7 +110,7 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
                 try {
                     // Try to parse the text as JSON for a more structured error message.
                     const errorJson = JSON.parse(responseBodyText);
-                    errorDetails = JSON.stringify(errorJson.error || errorJson);
+                    errorDetails = (errorJson.error || errorJson.message || JSON.stringify(errorJson));
                 } catch (e) {
                     // If parsing fails, the error response wasn't JSON. Use the raw text.
                     errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
