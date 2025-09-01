@@ -64,7 +64,7 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
     const proxyUrl = '/api-proxy/v1beta/models/gemini-2.5-flash-image-preview:generateContent';
 
     const body = {
-        contents: { parts: [imagePart, textPart] },
+        contents: [{ parts: [imagePart, textPart] }], // The API expects an array for `contents`.
         // The REST API uses 'generationConfig' for model parameters.
         generationConfig: {
             // Using raw strings to avoid runtime dependency on @google/genai
