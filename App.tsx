@@ -10,6 +10,7 @@ import { createAlbumPage } from './lib/albumUtils';
 import Footer from './components/Footer';
 import heic2any from 'heic2any';
 import Slideshow from './components/Slideshow';
+import { addWatermark } from './lib/utils';
 
 const DECADES = ['1900s', '1910s', '1920s', '1930s', '1940s', '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', '2010s'];
 
@@ -157,9 +158,10 @@ function App() {
             try {
                 const prompt = `Change the style of this photograph to look like it was taken in the ${decade}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`;
                 const resultUrl = await generateDecadeImage(uploadedImage, prompt);
+                const watermarkedUrl = await addWatermark(resultUrl);
                 setGeneratedImages(prev => ({
                     ...prev,
-                    [decade]: { status: 'done', url: resultUrl },
+                    [decade]: { status: 'done', url: watermarkedUrl },
                 }));
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
@@ -189,9 +191,10 @@ function App() {
         try {
             const prompt = `Change the style of this photograph to look like it was taken in the ${decade}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`;
             const resultUrl = await generateDecadeImage(uploadedImage, prompt);
+            const watermarkedUrl = await addWatermark(resultUrl);
             setGeneratedImages(prev => ({
                 ...prev,
-                [decade]: { status: 'done', url: resultUrl },
+                [decade]: { status: 'done', url: watermarkedUrl },
             }));
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
