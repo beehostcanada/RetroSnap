@@ -1,0 +1,5 @@
+{
+  "name": "RetroSnap",
+  "description": "Upload your photo and travel through time! RetroSnap uses AI to generate polaroid-style images of you reimagined through the years so you can reminisce.",
+  "requestFramePermissions": []
+}
