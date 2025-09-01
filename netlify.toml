@@ -1,0 +1,16 @@
+# netlify.toml
+
+# This redirect rule is the key to the proxy. It tells Netlify to take any
+# request that starts with "/api-proxy/" and forward it to our serverless
+# function located at "/.netlify/functions/api-proxy". The status code 200
+# makes this a "rewrite," meaning the browser's URL doesn't change, and it
+# appears as though the response came directly from the original path.
+[[redirects]]
+  from = "/api-proxy/*"
+  to = "/.netlify/functions/api-proxy"
+  status = 200
+
+# This setting tells Netlify where to find your serverless functions
+# within your project's directory structure.
+[functions]
+  directory = "netlify/functions/"
