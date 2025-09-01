@@ -90,19 +90,24 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
 
             clearTimeout(timeoutId);
 
+            // Read the response body as text ONCE. This avoids the "body stream already read" error.
+            const responseBodyText = await response.text();
+
             if (!response.ok) {
                 let errorDetails = `Status code: ${response.status}`;
                 try {
-                    const errorJson = await response.json();
+                    // Try to parse the text as JSON for a more structured error message.
+                    const errorJson = JSON.parse(responseBodyText);
                     errorDetails = JSON.stringify(errorJson.error || errorJson);
                 } catch (e) {
-                    // If parsing fails, use the raw text body
-                    errorDetails = `${errorDetails}, Body: ${await response.text()}`;
+                    // If parsing fails, the error response wasn't JSON. Use the raw text.
+                    errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
                 }
                 throw new Error(`API request failed: ${errorDetails}`);
             }
-
-            const responseJson = await response.json();
+            
+            // If the response was OK, parse the text we already fetched.
+            const responseJson = JSON.parse(responseBodyText);
             return responseJson as MinimalGenerateContentResponse;
 
         } catch (error) {
