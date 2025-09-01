@@ -33,14 +33,16 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             body: event.body,
         });
 
-        const data = await response.json();
+        // Read the response body as text ONCE to avoid "body already read" errors.
+        const responseBody = await response.text();
 
-        // If the API returned an error, forward that information
+        // If the API call was not successful, forward the exact error from Gemini.
         if (!response.ok) {
-            console.error("Gemini API Error:", data);
+            console.error(`Gemini API Error (Status: ${response.status}):`, responseBody);
             return {
                 statusCode: response.status,
-                body: JSON.stringify(data),
+                headers: { 'Content-Type': response.headers.get('Content-Type') || 'text/plain' },
+                body: responseBody,
             };
         }
 
@@ -50,7 +52,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(data),
+            body: responseBody,
         };
     } catch (error) {
         console.error("Error in proxy function:", error);
