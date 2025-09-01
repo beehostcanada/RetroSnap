@@ -60,16 +60,14 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
     const initialDelay = 1000;
     const requestTimeout = 30000; // 30 seconds
     
-    // Use the relative path to the proxy, with the generally available model.
-    const proxyUrl = '/api-proxy/v1beta/models/gemini-2.5-flash:generateContent';
+    // Use the relative path to the proxy, with the correct model for image editing.
+    const proxyUrl = '/api-proxy/v1beta/models/gemini-2.5-flash-image-preview:generateContent';
 
     const body = {
-        contents: [{ parts: [imagePart, textPart] }], // The API expects an array for `contents`.
-        // The REST API uses 'generationConfig' for model parameters.
-        generationConfig: {
-            // Using raw strings to avoid runtime dependency on @google/genai
-            responseModalities: ["IMAGE", "TEXT"],
-        },
+        contents: [{ parts: [imagePart, textPart] }],
+        // The `generationConfig` with `responseModalities` is not a standard REST API field
+        // and was likely causing the 404 error with the preview model.
+        // The model is specialized for image output and should infer the modality.
     };
 
     const bodyString = JSON.stringify(body);
