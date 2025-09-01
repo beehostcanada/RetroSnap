@@ -14,9 +14,9 @@ if (!rootElement) {
 
 // CRITICAL: Replace these placeholders with your actual Auth0 configuration.
 // You can find these values in your Auth0 Application and API settings.
-const AUTH0_DOMAIN = '__AUTH0_DOMAIN__';
-const AUTH0_CLIENT_ID = '__AUTH0_CLIENT_ID__';
-const AUTH0_AUDIENCE = '__AUTH0_AUDIENCE__'; // This is the 'Identifier' from your Auth0 API settings.
+const AUTH0_DOMAIN = 'dev-c10yl0evqx45fbln.us.auth0.com';
+const AUTH0_CLIENT_ID = 'RbFcz8pmjKqXHBhKCh7yVg5QSm5EjQ1A';
+const AUTH0_AUDIENCE = 'https://api.retrosnap.com'; // This is the 'Identifier' from your Auth0 API settings.
 
 if (AUTH0_DOMAIN.startsWith('__')) {
   alert('Authentication is not configured. Please edit index.tsx and replace the Auth0 placeholders.');
