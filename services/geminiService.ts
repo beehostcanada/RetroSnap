@@ -60,8 +60,8 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object): Pr
     const initialDelay = 1000;
     const requestTimeout = 30000; // 30 seconds
     
-    // Use the relative path to the proxy, derived from the error message.
-    const proxyUrl = '/api-proxy/v1beta/models/gemini-2.5-flash-image-preview:generateContent';
+    // Use the relative path to the proxy, with the generally available model.
+    const proxyUrl = '/api-proxy/v1beta/models/gemini-2.5-flash:generateContent';
 
     const body = {
         contents: [{ parts: [imagePart, textPart] }], // The API expects an array for `contents`.
