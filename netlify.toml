@@ -1,0 +1,8 @@
+# This rewrite rule is essential for Netlify.
+# It tells Netlify to take any request that starts with "/api-proxy/"
+# and send it to your serverless 'api-proxy' function instead of
+# looking for a file that doesn't exist. This fixes the 404 error.
+[[redirects]]
+  from = "/api-proxy/*"
+  to = "/.netlify/functions/api-proxy/:splat"
+  status = 200
