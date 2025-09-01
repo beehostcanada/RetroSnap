@@ -4,15 +4,17 @@
 */
 import React, { useState, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateDecadeImage } from './services/geminiService';
+import { generateStyledImage } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import { createAlbumPage } from './lib/albumUtils';
 import Footer from './components/Footer';
 import heic2any from 'heic2any';
 import Slideshow from './components/Slideshow';
 import { addWatermark } from './lib/utils';
+import { useAuth0 } from '@auth0/auth0-react';
 
 const DECADES = ['1900s', '1910s', '1920s', '1930s', '1940s', '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', '2010s'];
+const INSPIRATION_PROMPTS = ["A vibrant cartoon", "A charcoal sketch", "8-bit pixel art", "Vaporwave aesthetic", "An oil painting", "A futuristic robot"];
 
 const GHOST_POLAROIDS_CONFIG = [
   { initial: { x: "200%", y: "-150%", rotate: 15 }, transition: { delay: 0.1 } },
@@ -37,8 +39,9 @@ interface GeneratedImage {
     error?: string;
 }
 
-const primaryButtonClasses = "font-permanent-marker text-xl text-center text-stone-900 bg-teal-400 py-3 px-8 rounded-sm transform transition-all duration-200 hover:scale-105 hover:-rotate-2 shadow-[3px_3px_0px_#fb923c] hover:shadow-[4px_4px_0px_#f97316]";
+const primaryButtonClasses = "font-permanent-marker text-xl text-center text-stone-900 bg-teal-400 py-3 px-8 rounded-sm transform transition-all duration-200 hover:scale-105 hover:-rotate-2 shadow-[3px_3px_0px_#fb923c] hover:shadow-[4px_4px_0px_#f97316] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:rotate-0 disabled:shadow-[3px_3px_0px_#fb923c]";
 const secondaryButtonClasses = "font-permanent-marker text-xl text-center text-pink-500 bg-transparent border-2 border-pink-400 py-3 px-8 rounded-sm transform transition-all duration-200 hover:scale-105 hover:rotate-2 hover:bg-pink-400 hover:text-white";
+const inspirationButtonClasses = "font-permanent-marker text-sm text-center text-orange-600 bg-orange-100 border border-orange-200 py-2 px-4 rounded-sm transition-all duration-200 hover:scale-105 hover:bg-orange-200";
 
 const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -67,7 +70,6 @@ const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number):
             }
             ctx.drawImage(img, 0, 0, width, height);
             
-            // Using JPEG for better compression of photos, with a quality of 90%
             resolve(canvas.toDataURL('image/jpeg', 0.9));
         };
         img.onerror = () => {
@@ -78,6 +80,7 @@ const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number):
 };
 
 function App() {
+    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently } = useAuth0();
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -85,23 +88,21 @@ function App() {
     const [isProcessingUpload, setIsProcessingUpload] = useState<boolean>(false);
     const [slideshowOpen, setSlideshowOpen] = useState(false);
     const [slideshowStartIndex, setSlideshowStartIndex] = useState(0);    
+    const [customPrompt, setCustomPrompt] = useState('');
 
     const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;
 
         let file = e.target.files[0];
-        // Reset file input to allow re-uploading the same file if an error occurs.
         e.target.value = '';
 
         setIsProcessingUpload(true);
         
         try {
-            // Check if the file is HEIC/HEIF by type or extension, and convert it.
             const isHeic = file.type.includes('heic') || file.type.includes('heif') || /\.(heic|heif)$/i.test(file.name);
             
             if (isHeic) {
                 console.log("HEIC file detected. Converting to JPEG...");
-                // The `heic2any` library can return a single blob or an array of blobs.
                 const convertedBlob = await heic2any({
                     blob: file,
                     toType: "image/jpeg",
@@ -112,7 +113,6 @@ function App() {
                 file = new File([finalBlob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
             }
 
-            // Read the file (original or converted) into a data URL.
             const dataUrl = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = () => {
@@ -126,12 +126,11 @@ function App() {
                 reader.readAsDataURL(file);
             });
 
-            // Resize the image to a web-friendly size.
             const resizedImage = await resizeImage(dataUrl, 1024, 1024);
             
             setUploadedImage(resizedImage);
             setAppState('image-uploaded');
-            setGeneratedImages({}); // Clear any previous results.
+            setGeneratedImages({});
 
         } catch (error) {
             console.error("Error processing image:", error);
@@ -142,7 +141,18 @@ function App() {
         }
     };
 
-    const handleGenerateClick = async () => {
+    const getAuthToken = async (): Promise<string> => {
+        try {
+            const token = await getAccessTokenSilently();
+            if (!token) throw new Error("Could not retrieve access token.");
+            return token;
+        } catch (error) {
+            console.error("Error getting access token", error);
+            throw new Error("Authentication error: Could not get a token for the API. Please try logging in again.");
+        }
+    }
+
+    const handleGenerateTimeline = async () => {
         if (!uploadedImage) return;
 
         setAppState('generating');
@@ -153,56 +163,78 @@ function App() {
         });
         setGeneratedImages(initialImages);
         
-        // Process decades sequentially for maximum stability on mobile.
-        for (const decade of DECADES) {
-            try {
-                const prompt = `Change the style of this photograph to look like it was taken in the ${decade}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`;
-                const resultUrl = await generateDecadeImage(uploadedImage, prompt);
-                const watermarkedUrl = await addWatermark(resultUrl);
-                setGeneratedImages(prev => ({
-                    ...prev,
-                    [decade]: { status: 'done', url: watermarkedUrl },
-                }));
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-                setGeneratedImages(prev => ({
-                    ...prev,
-                    [decade]: { status: 'error', error: errorMessage },
-                }));
-                console.error(`Failed to generate image for ${decade}:`, err);
+        try {
+            const token = await getAuthToken();
+            for (const decade of DECADES) {
+                try {
+                    const prompt = `Change the style of this photograph to look like it was taken in the ${decade}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`;
+                    const resultUrl = await generateStyledImage(uploadedImage, prompt, token);
+                    const watermarkedUrl = await addWatermark(resultUrl);
+                    setGeneratedImages(prev => ({
+                        ...prev,
+                        [decade]: { status: 'done', url: watermarkedUrl },
+                    }));
+                } catch (err) {
+                    const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+                    setGeneratedImages(prev => ({
+                        ...prev,
+                        [decade]: { status: 'error', error: errorMessage },
+                    }));
+                    console.error(`Failed to generate image for ${decade}:`, err);
+                }
             }
+        } catch(authError) {
+             alert(authError instanceof Error ? authError.message : "An unknown authentication error occurred.");
+             setAppState('image-uploaded');
+             return;
         }
 
         setAppState('results-shown');
     };
 
-    const handleRegenerateDecade = async (decade: string) => {
-        if (!uploadedImage || generatedImages[decade]?.status === 'pending') {
-            return;
-        }
-        
-        console.log(`Regenerating image for ${decade}...`);
+    const handleGenerateCustom = async () => {
+        if (!uploadedImage || !customPrompt.trim()) return;
 
-        setGeneratedImages(prev => ({
-            ...prev,
-            [decade]: { status: 'pending' },
-        }));
+        setAppState('generating');
+        const prompt = customPrompt.trim();
+        setGeneratedImages({ [prompt]: { status: 'pending' } });
 
         try {
-            const prompt = `Change the style of this photograph to look like it was taken in the ${decade}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`;
-            const resultUrl = await generateDecadeImage(uploadedImage, prompt);
+            const token = await getAuthToken();
+            const fullPrompt = `Change the style of this photograph to look like: ${prompt}. Adapt the original photo to match the new style, but keep the person's face recognizable.`;
+            const resultUrl = await generateStyledImage(uploadedImage, fullPrompt, token);
             const watermarkedUrl = await addWatermark(resultUrl);
-            setGeneratedImages(prev => ({
-                ...prev,
-                [decade]: { status: 'done', url: watermarkedUrl },
-            }));
+            setGeneratedImages({ [prompt]: { status: 'done', url: watermarkedUrl } });
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-            setGeneratedImages(prev => ({
-                ...prev,
-                [decade]: { status: 'error', error: errorMessage },
-            }));
-            console.error(`Failed to regenerate image for ${decade}:`, err);
+            setGeneratedImages({ [prompt]: { status: 'error', error: errorMessage } });
+            console.error(`Failed to generate custom image for prompt "${prompt}":`, err);
+        }
+
+        setAppState('results-shown');
+    };
+
+    const handleRegenerate = async (prompt: string) => {
+        if (!uploadedImage || generatedImages[prompt]?.status === 'pending') return;
+        
+        setGeneratedImages(prev => ({ ...prev, [prompt]: { status: 'pending' } }));
+
+        try {
+            const token = await getAuthToken();
+            const fullPrompt = DECADES.includes(prompt) 
+                ? `Change the style of this photograph to look like it was taken in the ${prompt}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`
+                : `Change the style of this photograph to look like: ${prompt}. Adapt the original photo to match the new style, but keep the person's face recognizable.`;
+            
+            const resultUrl = await generateStyledImage(uploadedImage, fullPrompt, token);
+            const watermarkedUrl = await addWatermark(resultUrl);
+            setGeneratedImages(prev => ({ ...prev, [prompt]: { status: 'done', url: watermarkedUrl } }));
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
+             if (errorMessage.includes("Authentication error")) {
+                alert(errorMessage);
+            }
+            setGeneratedImages(prev => ({ ...prev, [prompt]: { status: 'error', error: errorMessage } }));
+            console.error(`Failed to regenerate image for prompt "${prompt}":`, err);
         }
     };
     
@@ -210,14 +242,15 @@ function App() {
         setUploadedImage(null);
         setGeneratedImages({});
         setAppState('idle');
+        setCustomPrompt('');
     };
 
-    const handleDownloadIndividualImage = (decade: string) => {
-        const image = generatedImages[decade];
+    const handleDownloadIndividualImage = (prompt: string) => {
+        const image = generatedImages[prompt];
         if (image?.status === 'done' && image.url) {
             const link = document.createElement('a');
             link.href = image.url;
-            link.download = `retrosnap-${decade}.jpg`;
+            link.download = `retrosnap-${prompt.replace(/\s+/g, '-').toLowerCase()}.jpg`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -228,10 +261,7 @@ function App() {
         setIsDownloading(true);
         try {
             const imageData = Object.keys(generatedImages)
-                .filter(decade => {
-                    const image = generatedImages[decade];
-                    return image.status === 'done' && !!image.url;
-                })
+                .filter(decade => generatedImages[decade].status === 'done' && !!generatedImages[decade].url)
                 .reduce((acc, decade) => {
                     acc[decade] = generatedImages[decade].url!;
                     return acc;
@@ -259,14 +289,15 @@ function App() {
         }
     };
 
-    const successfulImages = DECADES
-        .map(decade => ({
-            decade,
-            status: generatedImages[decade]?.status,
-            url: generatedImages[decade]?.url,
+    const generatedKeys = Object.keys(generatedImages);
+    const successfulImages = generatedKeys
+        .map(key => ({
+            caption: key,
+            status: generatedImages[key]?.status,
+            url: generatedImages[key]?.url,
         }))
         .filter(image => image.status === 'done' && image.url)
-        .map(image => ({ url: image.url!, caption: image.decade }));
+        .map(image => ({ url: image.url!, caption: image.caption }));
 
 
     return (
@@ -278,7 +309,27 @@ function App() {
                     <p className="font-permanent-marker text-stone-600 mt-2 text-xl tracking-wide">Snap photos through the years and reminisce.</p>
                 </div>
 
-                {appState === 'idle' && (
+                {isLoading && (
+                    <div className="font-permanent-marker text-stone-500 text-lg">Loading...</div>
+                )}
+                
+                {!isLoading && !isAuthenticated && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5 }}
+                        className="flex flex-col items-center gap-6"
+                    >
+                         <p className="font-permanent-marker text-stone-500 text-center max-w-sm text-lg">
+                            Log in to start your journey through time and generate your own retro photo album.
+                         </p>
+                        <button onClick={() => loginWithRedirect()} className={primaryButtonClasses}>
+                            Login
+                        </button>
+                    </motion.div>
+                )}
+
+                {isAuthenticated && appState === 'idle' && (
                      <div className="relative flex flex-col items-center justify-center w-full">
                         {GHOST_POLAROIDS_CONFIG.map((config, index) => (
                              <motion.div
@@ -317,61 +368,111 @@ function App() {
                     </div>
                 )}
 
-                {appState === 'image-uploaded' && uploadedImage && (
-                    <div className="flex flex-col items-center gap-6">
+                {isAuthenticated && appState === 'image-uploaded' && uploadedImage && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5 }}
+                        className="flex flex-col items-center gap-8 w-full max-w-lg"
+                    >
                          <PolaroidCard 
                             imageUrl={uploadedImage} 
                             caption="Your Photo" 
                             status="done"
                          />
-                         <div className="flex items-center gap-4 mt-4">
-                            <button onClick={handleReset} className={secondaryButtonClasses}>
-                                Different Photo
-                            </button>
-                            <button onClick={handleGenerateClick} className={primaryButtonClasses}>
+                         <div className="w-full flex flex-col items-center gap-4">
+                            <button onClick={handleGenerateTimeline} className={primaryButtonClasses}>
                                 Generate Timeline
                             </button>
+
+                            <div className="w-full text-center my-2">
+                                <span className="font-permanent-marker text-stone-500 text-lg">OR</span>
+                            </div>
+
+                            <div className="w-full bg-stone-50/50 p-4 rounded-md border border-stone-200">
+                                <p className="font-permanent-marker text-stone-600 text-center text-lg mb-3">Try a Custom Style</p>
+                                <div className="flex gap-2">
+                                    <input 
+                                        type="text"
+                                        value={customPrompt}
+                                        onChange={(e) => setCustomPrompt(e.target.value)}
+                                        placeholder="e.g., An oil painting, a futuristic robot..."
+                                        className="w-full px-3 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                                    />
+                                    <button onClick={handleGenerateCustom} disabled={!customPrompt.trim()} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
+                                        Go
+                                    </button>
+                                </div>
+                                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                                    {INSPIRATION_PROMPTS.map(prompt => (
+                                        <button key={prompt} onClick={() => setCustomPrompt(prompt)} className={inspirationButtonClasses}>
+                                            {prompt}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                          </div>
-                    </div>
+                         <button onClick={handleReset} className={`${secondaryButtonClasses} mt-4`}>
+                            Different Photo
+                        </button>
+                    </motion.div>
                 )}
 
-                {(appState === 'generating' || appState === 'results-shown') && (
+                {isAuthenticated && (appState === 'generating' || appState === 'results-shown') && (
                      <div className="w-full max-w-5xl flex flex-col items-center">
-                        <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 p-4">
-                            {DECADES.map((decade) => (
-                                <div key={decade} className="flex justify-center">
-                                     <PolaroidCard
-                                        caption={decade}
-                                        status={generatedImages[decade]?.status || 'pending'}
-                                        imageUrl={generatedImages[decade]?.url}
-                                        error={generatedImages[decade]?.error}
-                                        onRegenerate={handleRegenerateDecade}
+                        {generatedKeys.length > 1 ? (
+                            <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 p-4">
+                                {DECADES.map((decade) => (
+                                    <div key={decade} className="flex justify-center">
+                                        <PolaroidCard
+                                            caption={decade}
+                                            status={generatedImages[decade]?.status || 'pending'}
+                                            imageUrl={generatedImages[decade]?.url}
+                                            error={generatedImages[decade]?.error}
+                                            onRegenerate={handleRegenerate}
+                                            onDownload={handleDownloadIndividualImage}
+                                            onCardClick={
+                                                generatedImages[decade]?.status === 'done' && generatedImages[decade]?.url ?
+                                                () => {
+                                                    const successfulIndex = successfulImages.findIndex(img => img.caption === decade);
+                                                    if (successfulIndex > -1) {
+                                                        setSlideshowStartIndex(successfulIndex);
+                                                        setSlideshowOpen(true);
+                                                    }
+                                                } : undefined
+                                            }
+                                        />
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="flex justify-center p-4">
+                                {generatedKeys.map((key) => (
+                                    <PolaroidCard
+                                        key={key}
+                                        caption={key}
+                                        status={generatedImages[key]?.status || 'pending'}
+                                        imageUrl={generatedImages[key]?.url}
+                                        error={generatedImages[key]?.error}
+                                        onRegenerate={handleRegenerate}
                                         onDownload={handleDownloadIndividualImage}
-                                        onCardClick={
-                                            generatedImages[decade]?.status === 'done' && generatedImages[decade]?.url ?
-                                            () => {
-                                                const successfulIndex = successfulImages.findIndex(img => img.caption === decade);
-                                                if (successfulIndex > -1) {
-                                                    setSlideshowStartIndex(successfulIndex);
-                                                    setSlideshowOpen(true);
-                                                }
-                                            } : undefined
-                                        }
                                     />
-                                </div>
-                            ))}
-                        </div>
+                                ))}
+                            </div>
+                        )}
                          <div className="h-20 mt-8 flex items-center justify-center">
                             {appState === 'results-shown' && (
                                 <div className="flex flex-col sm:flex-row items-center gap-4">
-                                    <button 
-                                        onClick={handleDownloadAlbum} 
-                                        disabled={isDownloading} 
-                                        className={`${primaryButtonClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                    >
-                                        {isDownloading ? 'Creating Album...' : 'Download Album'}
-                                    </button>
-                                     {successfulImages.length > 0 && (
+                                    {generatedKeys.length > 1 && (
+                                        <button 
+                                            onClick={handleDownloadAlbum} 
+                                            disabled={isDownloading} 
+                                            className={`${primaryButtonClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                        >
+                                            {isDownloading ? 'Creating Album...' : 'Download Album'}
+                                        </button>
+                                    )}
+                                     {successfulImages.length > 1 && (
                                         <button 
                                             onClick={() => {
                                                 setSlideshowStartIndex(0);

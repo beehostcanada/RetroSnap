@@ -2,45 +2,64 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
+import type { Handler, HandlerEvent } from "@netlify/functions";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 
-const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
-    // Ensure the Gemini API key is set in Netlify's environment variables
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
+const handler: Handler = async (event: HandlerEvent) => {
+    const { AUTH0_DOMAIN, API_KEY } = process.env;
+
+    // --- VALIDATE ENVIRONMENT ---
+    if (!AUTH0_DOMAIN) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "AUTH0_DOMAIN is not configured on the server." }),
+        };
+    }
+    if (!API_KEY) {
         return {
             statusCode: 500,
             body: JSON.stringify({ error: "API_KEY is not configured on the server." }),
         };
     }
+    // --- END VALIDATE ENVIRONMENT ---
 
-    // --- AUTHENTICATION GATING ---
-    // This checks for a secret key sent from the client to prevent abuse.
-    const serverSecret = process.env.CLIENT_SECRET;
-    if (!serverSecret) {
+
+    // --- AUTHENTICATION GATING using Auth0 /userinfo endpoint ---
+    const authHeader = event.headers['authorization'];
+    if (!authHeader) {
         return {
-            statusCode: 500,
-            body: JSON.stringify({ error: "CLIENT_SECRET is not configured on the server. Auth gating is required." }),
+            statusCode: 401,
+            body: JSON.stringify({ error: "Unauthorized: Missing Authorization header." }),
         };
     }
 
-    const clientSecret = event.headers['x-client-secret'];
-    if (!clientSecret || clientSecret !== serverSecret) {
+    try {
+        const userInfoResponse = await fetch(`https://${AUTH0_DOMAIN}/userinfo`, {
+            headers: {
+                Authorization: authHeader,
+            },
+        });
+
+        if (!userInfoResponse.ok) {
+            const errorBody = await userInfoResponse.text();
+            console.error("Auth0 user info validation failed:", errorBody);
+            return {
+                statusCode: 401,
+                body: JSON.stringify({ error: "Unauthorized: Invalid token." }),
+            };
+        }
+    } catch (error) {
+        console.error("Error validating token with Auth0:", error);
         return {
-            statusCode: 403,
-            body: JSON.stringify({ error: "Forbidden: Invalid or missing client secret." }),
+            statusCode: 500,
+            body: JSON.stringify({ error: "An internal error occurred during authentication." }),
         };
     }
     // --- END AUTHENTICATION GATING ---
 
-    // Extract the path from the request URL (e.g., /v1beta/models/...)
-    // The path is everything after '/api-proxy/'
     const path = event.path.replace('/api-proxy/', '');
-    
-    // Construct the full Gemini API URL
-    const geminiUrl = `${GEMINI_API_BASE_URL}/${path}?key=${apiKey}`;
+    const geminiUrl = `${GEMINI_API_BASE_URL}/${path}?key=${API_KEY}`;
 
     try {
         const response = await fetch(geminiUrl, {
@@ -48,14 +67,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             headers: {
                 'Content-Type': 'application/json',
             },
-            // Pass the original body from the frontend request to the Gemini API
             body: event.body,
         });
 
-        // Read the response body as text ONCE to avoid "body already read" errors.
         const responseBody = await response.text();
 
-        // If the API call was not successful, forward the exact error from Gemini.
         if (!response.ok) {
             console.error(`Gemini API Error (Status: ${response.status}):`, responseBody);
             return {
@@ -65,7 +81,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             };
         }
 
-        // Return the successful response from Gemini to the frontend
         return {
             statusCode: 200,
             headers: {
