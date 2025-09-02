@@ -66,7 +66,7 @@ if (!rootElement) {
 const AUTH0_DOMAIN = 'dev-c10yl0evqx45fbln.us.auth0.com';
 const AUTH0_CLIENT_ID = 'RbFcz8pmjKqXHBhKCh7yVg5QSm5EjQ1A';
 // Dynamically create a unique identifier for the API based on the deployment hostname.
-const AUTH0_AUDIENCE = `https://api.${window.location.hostname}`;
+const AUTH0_AUDIENCE = `https://api.retrosnap.com`;
 
 
 /**
