@@ -7,20 +7,26 @@ import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 
 /**
- * Retrieves a user's credits from the KV store. If the user doesn't exist,
- * it initializes them with 3 credits.
+ * Retrieves a user's credits from the KV store. If the user doesn't exist or
+ * the data is invalid, it initializes them with 3 credits.
  * @param store The Netlify KV store instance.
  * @param userId The unique identifier for the user.
  * @returns A promise that resolves to the user's credit balance.
  */
 async function getOrCreateUserCredits(store: any, userId: string): Promise<number> {
-    let credits = await store.get(userId);
-    if (credits === null) {
-        // New user, initialize with 3 credits.
+    const credits = await store.get(userId);
+
+    // A non-existent key returns null. We also defensively check for non-numeric
+    // values to handle potential data corruption or unexpected return types from the store.
+    if (credits === null || typeof credits !== 'number') {
+        // This is a new user or the stored value is invalid.
+        // Initialize their credits to 3.
         await store.set(userId, 3);
         return 3;
     }
-    return Number(credits);
+    
+    // The value exists and is a number, so we can return it.
+    return credits;
 }
 
 
