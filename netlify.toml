@@ -1,4 +1,0 @@
-[[redirects]]
-  from = "/api-proxy/*"
-  to = "/.netlify/functions/api-proxy/:splat"
-  status = 200

@@ -24,6 +24,11 @@ interface MinimalGenerateContentResponse {
     candidates?: Candidate[];
 }
 
+export interface AdminUser {
+    email: string;
+    credits: number;
+}
+
 
 // --- Helper Functions ---
 
@@ -211,4 +216,58 @@ export async function deductUserCredit(token: string): Promise<{ credits: number
     }
 
     return JSON.parse(responseBodyText);
+}
+
+/**
+ * Fetches all users and their credit balances. (Admin only)
+ * @param token The admin user's JWT.
+ * @returns A promise that resolves to an array of user objects.
+ */
+export async function getAdminUsers(token: string): Promise<AdminUser[]> {
+    const response = await fetch('/api-proxy/admin/users', {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+        },
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        try {
+            throw new Error(JSON.parse(errorBody).error || errorBody);
+        } catch {
+             throw new Error(`Failed to get users: ${errorBody}`);
+        }
+    }
+
+    return response.json();
+}
+
+/**
+ * Adds credits to a specific user's account. (Admin only)
+ * @param token The admin user's JWT.
+ * @param email The email of the user to receive credits.
+ * @param amount The number of credits to add.
+ * @returns A promise that resolves to an object with the user's new credit count.
+ */
+export async function addCreditsToUser(token: string, email: string, amount: number): Promise<{ credits: number }> {
+     const response = await fetch('/api-proxy/admin/users/add-credits', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, amount }),
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+         try {
+            throw new Error(JSON.parse(errorBody).error || errorBody);
+        } catch {
+            throw new Error(`Failed to add credits: ${errorBody}`);
+        }
+    }
+
+    return response.json();
 }

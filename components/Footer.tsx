@@ -4,13 +4,18 @@
 */
 import React from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
+import { Link } from 'react-router-dom';
 
 interface FooterProps {
     useAuthHook?: () => any;
 }
 
+// IMPORTANT: This list must be kept in sync with the one in `netlify/functions/api-proxy.ts`
+const ADMIN_USERS = ['admin@example.com'];
+
 const Footer = ({ useAuthHook = useAuth0 }: FooterProps) => {
     const { user, isAuthenticated, logout } = useAuthHook();
+    const isUserAdmin = user && ADMIN_USERS.includes(user.email);
 
     return (
         <footer className="fixed bottom-0 left-0 right-0 bg-sky-600 p-3 z-50 text-sky-100 text-xs sm:text-sm border-t border-sky-300">
@@ -20,6 +25,14 @@ const Footer = ({ useAuthHook = useAuth0 }: FooterProps) => {
                     {isAuthenticated && user && (
                         <div className="flex items-center gap-4">
                              <p className="hidden sm:block text-white-950 font-bold">{user.email}</p>
+                             {isUserAdmin && (
+                                <>
+                                    <Link to="/admin" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">
+                                        Admin
+                                    </Link>
+                                    <span className="text-sky-400" aria-hidden="true">|</span>
+                                </>
+                             )}
                              <button
                                 onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                                 className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200"

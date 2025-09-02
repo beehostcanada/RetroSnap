@@ -6,6 +6,10 @@ import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 
+// IMPORTANT: Replace with your admin user's email address(es).
+// Only these users will be able to access the admin endpoints.
+const ADMIN_USERS = ['ajbatac@gmail.com'];
+
 /**
  * Retrieves a user's credits from the KV store. If the user doesn't exist or
  * the data is invalid, it initializes them with 3 credits.
@@ -14,18 +18,26 @@ const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
  * @returns A promise that resolves to the user's credit balance.
  */
 async function getOrCreateUserCredits(store: any, userId: string): Promise<number> {
-    const credits = await store.get(userId);
+    const storedValue = await store.get(userId);
 
-    // A non-existent key returns null. We also defensively check for non-numeric
-    // values to handle potential data corruption or unexpected return types from the store.
-    if (credits === null || typeof credits !== 'number') {
-        // This is a new user or the stored value is invalid.
-        // Initialize their credits to 3.
+    // Case 1: New user. The store returns null for a non-existent key.
+    if (storedValue === null) {
+        await store.set(userId, 3);
+        return 3;
+    }
+
+    // Case 2: Existing user or potentially corrupted data.
+    // We use parseInt which handles numbers and numeric strings, but returns NaN for other types.
+    const credits = parseInt(storedValue as any, 10);
+
+    // If parsing results in NaN (e.g., from "abc", an empty object, etc.), the data
+    // is considered invalid. In this case, we reset the user's credits.
+    if (isNaN(credits)) {
         await store.set(userId, 3);
         return 3;
     }
     
-    // The value exists and is a number, so we can return it.
+    // The value is a valid number.
     return credits;
 }
 
@@ -61,7 +73,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
                 body: JSON.stringify({ error: `Unauthorized: Dev token is only allowed in dev environments, but CONTEXT is '${CONTEXT}'.` }),
             };
         }
-        userIdentifier = 'dev@example.com';
+        userIdentifier = 'admin@example.com'; // Use admin for dev token
     } else {
         if (!authHeader) {
             return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: Missing Authorization header." }) };
@@ -97,15 +109,66 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     }
 
     const requestPath = event.path.replace('/api-proxy/', '');
+    const isAdmin = userIdentifier && ADMIN_USERS.includes(userIdentifier);
 
-    // --- ENDPOINT ROUTING ---
+    // --- ADMIN ENDPOINT ROUTING ---
+    if (requestPath.startsWith('admin/')) {
+        if (!isAdmin) {
+            return { statusCode: 403, body: JSON.stringify({ error: "Forbidden: Admin access required." }) };
+        }
+
+        try {
+            const creditsStore = (context as any).netlify?.kvStore?.("credits");
+            if (!creditsStore) {
+                throw new Error("KV Store not available in this environment.");
+            }
+            
+            // GET /admin/users - List all users and their credits
+            if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
+                const { keys } = await creditsStore.list();
+                const users = await Promise.all(
+                    keys.map(async ({ name }: { name: string }) => {
+                        const credits = await creditsStore.get(name);
+                        return { email: name, credits: parseInt(credits as any, 10) || 0 };
+                    })
+                );
+                users.sort((a, b) => a.email.localeCompare(b.email)); // Sort alphabetically
+                return { statusCode: 200, body: JSON.stringify(users) };
+            }
+            
+            // POST /admin/users/add-credits - Add credits to a user
+            if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
+                if (!event.body) {
+                    return { statusCode: 400, body: JSON.stringify({ error: "Request body is missing." }) };
+                }
+
+                const { email, amount } = JSON.parse(event.body);
+                if (!email || typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0) {
+                    return { statusCode: 400, body: JSON.stringify({ error: "Invalid request. 'email' and a positive integer 'amount' are required." }) };
+                }
+                
+                const currentCredits = await getOrCreateUserCredits(creditsStore, email);
+                const newCredits = currentCredits + amount;
+                await creditsStore.set(email, newCredits);
+                
+                return { statusCode: 200, body: JSON.stringify({ credits: newCredits }) };
+            }
+
+            return { statusCode: 404, body: JSON.stringify({ error: "Admin route not found." }) };
+        } catch (kvError) {
+            console.error("Error with KV Store for admin action:", kvError);
+            return { statusCode: 500, body: JSON.stringify({ error: "An error occurred with the credit system." }) };
+        }
+    }
+
+
+    // --- REGULAR USER ENDPOINT ROUTING ---
 
     // Handle GET and POST requests to the /credits endpoint
     if (requestPath === 'credits') {
         try {
             const creditsStore = (context as any).netlify?.kvStore?.("credits");
             if (!creditsStore) {
-                // This will be caught by the catch block below.
                 throw new Error("KV Store not available in this environment.");
             }
 

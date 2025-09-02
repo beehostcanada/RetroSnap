@@ -4,8 +4,10 @@
 */
 import React, { ErrorInfo, ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
-import { Auth0Provider } from '@auth0/auth0-react';
+import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
+import AdminPage from './pages/AdminPage';
 
 // --- Simple Error Boundary for Catching Critical Errors ---
 interface ErrorBoundaryProps {
@@ -75,7 +77,7 @@ const AUTH0_AUDIENCE = `https://api.retrosnap.com`;
 const useDevAuth = () => ({
     user: {
         name: 'Dev User',
-        email: 'dev@example.com',
+        email: 'admin@example.com', // Using admin email for dev mode
         picture: `https://ui-avatars.com/api/?name=Dev+User&background=random`,
     },
     isAuthenticated: true,
@@ -90,13 +92,23 @@ const useDevAuth = () => ({
     getAccessTokenSilently: async () => 'dev-token',
 });
 
+const AppWrapper = ({ useAuthHook }: { useAuthHook: () => any }) => {
+    return (
+        <BrowserRouter>
+            <Routes>
+                <Route path="/" element={<App useAuthHook={useAuthHook} />} />
+                <Route path="/admin" element={<AdminPage useAuthHook={useAuthHook} />} />
+            </Routes>
+        </BrowserRouter>
+    );
+};
 
 const Main = () => {
     // Bypass Auth0 on localhost (and in the dev IDE) for easier development.
     const isDev = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.sercontent.goog');
 
     if (isDev) {
-        return <App useAuthHook={useDevAuth} />;
+        return <AppWrapper useAuthHook={useDevAuth} />;
     }
     
     return (
@@ -108,7 +120,7 @@ const Main = () => {
                 audience: AUTH0_AUDIENCE,
             }}
         >
-            <App />
+            <AppWrapper useAuthHook={useAuth0} />
         </Auth0Provider>
     );
 };
