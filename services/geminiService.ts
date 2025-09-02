@@ -97,7 +97,7 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object, tok
                     errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
                 }
 
-                // If the user is unauthorized, provide a helpful message.
+                // Handle specific, actionable errors first.
                 if (response.status === 401) {
                     throw new Error("Authentication failed. Please log out and log back in.");
                 }
@@ -156,4 +156,59 @@ export async function generateStyledImage(imageDataUrl: string, prompt: string, 
         const errorMessage = error instanceof Error ? error.message : String(error);
         throw new Error(`The AI model failed to generate an image. Details: ${errorMessage}`);
     }
+}
+
+/**
+ * Fetches the current user's credit balance.
+ * @param token The user's JWT for authentication.
+ * @returns A promise that resolves to an object containing the credit count.
+ */
+export async function getUserCredits(token: string): Promise<{ credits: number }> {
+    const response = await fetch('/api-proxy/credits', {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+        },
+    });
+
+    if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Failed to get credits: ${errorBody}`);
+    }
+
+    return response.json();
+}
+
+
+/**
+ * Deducts one credit from the user's account.
+ * @param token The user's JWT for authentication.
+ * @returns A promise that resolves to an object with the new credit count.
+ */
+export async function deductUserCredit(token: string): Promise<{ credits: number }> {
+    const response = await fetch('/api-proxy/credits', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${token}`,
+        },
+    });
+
+    const responseBodyText = await response.text();
+    if (!response.ok) {
+        let errorDetails = `Status code: ${response.status}`;
+        try {
+            const errorJson = JSON.parse(responseBodyText);
+            errorDetails = (errorJson.error || errorJson.message || JSON.stringify(errorJson));
+        } catch (e) {
+            errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
+        }
+        
+        if (response.status === 402) {
+            throw new Error("You are out of credits.");
+        }
+        
+        throw new Error(`Failed to deduct credit: ${errorDetails}`);
+    }
+
+    return JSON.parse(responseBodyText);
 }

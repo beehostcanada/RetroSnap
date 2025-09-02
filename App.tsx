@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, { useState, ChangeEvent } from 'react';
+import React, { useState, ChangeEvent, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateStyledImage } from './services/geminiService';
+import { generateStyledImage, getUserCredits, deductUserCredit } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import { createAlbumPage } from './lib/albumUtils';
 import Footer from './components/Footer';
@@ -37,6 +37,10 @@ interface GeneratedImage {
     status: ImageStatus;
     url?: string;
     error?: string;
+}
+
+interface AppProps {
+    useAuthHook?: () => any;
 }
 
 const primaryButtonClasses = "font-permanent-marker text-xl text-center text-stone-900 bg-teal-400 py-3 px-8 rounded-sm transform transition-all duration-200 hover:scale-105 hover:-rotate-2 shadow-[3px_3px_0px_#fb923c] hover:shadow-[4px_4px_0px_#f97316] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:rotate-0 disabled:shadow-[3px_3px_0px_#fb923c]";
@@ -79,8 +83,8 @@ const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number):
     });
 };
 
-function App() {
-    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently } = useAuth0();
+function App({ useAuthHook = useAuth0 }: AppProps) {
+    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently } = useAuthHook();
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -89,6 +93,31 @@ function App() {
     const [slideshowOpen, setSlideshowOpen] = useState(false);
     const [slideshowStartIndex, setSlideshowStartIndex] = useState(0);    
     const [customPrompt, setCustomPrompt] = useState('');
+    const [credits, setCredits] = useState<number | null>(null);
+    const [creditsLoading, setCreditsLoading] = useState<boolean>(true);
+    const [creditUsedForCurrentImage, setCreditUsedForCurrentImage] = useState<boolean>(false);
+
+    useEffect(() => {
+        if (isAuthenticated) {
+            const fetchCredits = async () => {
+                setCreditsLoading(true);
+                try {
+                    const token = await getAccessTokenSilently();
+                    const { credits } = await getUserCredits(token);
+                    setCredits(credits);
+                } catch (error) {
+                    console.error("Failed to fetch credits:", error);
+                    setCredits(0); // Assume no credits if fetch fails
+                } finally {
+                    setCreditsLoading(false);
+                }
+            };
+            fetchCredits();
+        } else {
+            setCredits(null);
+            setCreditsLoading(false);
+        }
+    }, [isAuthenticated, getAccessTokenSilently]);
 
     const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;
@@ -131,6 +160,7 @@ function App() {
             setUploadedImage(resizedImage);
             setAppState('image-uploaded');
             setGeneratedImages({});
+            setCreditUsedForCurrentImage(false);
 
         } catch (error) {
             console.error("Error processing image:", error);
@@ -155,6 +185,12 @@ function App() {
     const handleGenerateTimeline = async () => {
         if (!uploadedImage) return;
 
+        // Check if user has credits, unless they've already paid for this image.
+        if (!creditUsedForCurrentImage && credits !== null && credits <= 0) {
+            alert("You are out of credits and cannot generate images from a new photo.");
+            return;
+        }
+
         setAppState('generating');
         
         const initialImages: Record<string, GeneratedImage> = {};
@@ -163,6 +199,8 @@ function App() {
         });
         setGeneratedImages(initialImages);
         
+        let atLeastOneSuccess = false;
+
         try {
             const token = await getAuthToken();
             for (const decade of DECADES) {
@@ -174,6 +212,7 @@ function App() {
                         ...prev,
                         [decade]: { status: 'done', url: watermarkedUrl },
                     }));
+                    atLeastOneSuccess = true;
                 } catch (err) {
                     const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
                     setGeneratedImages(prev => ({
@@ -189,26 +228,72 @@ function App() {
              return;
         }
 
+        // If at least one image was made, and we haven't charged for this upload yet, deduct a credit.
+        if (atLeastOneSuccess && !creditUsedForCurrentImage) {
+            try {
+                const token = await getAuthToken();
+                const { credits: newCredits } = await deductUserCredit(token);
+                setCredits(newCredits);
+                setCreditUsedForCurrentImage(true);
+            } catch (error) {
+                console.error(
+                    "Critical: Failed to deduct credit after a successful generation. " +
+                    "The user has received a free generation for this image upload. " +
+                    "Marking credit as used on the client to prevent further free generations.",
+                    error
+                );
+                // Mark as used anyway to prevent abuse.
+                setCreditUsedForCurrentImage(true);
+            }
+        }
+
         setAppState('results-shown');
     };
 
     const handleGenerateCustom = async () => {
         if (!uploadedImage || !customPrompt.trim()) return;
 
+        // Check if user has credits, unless they've already paid for this image.
+        if (!creditUsedForCurrentImage && credits !== null && credits <= 0) {
+            alert("You are out of credits and cannot generate images from a new photo.");
+            return;
+        }
+
         setAppState('generating');
         const prompt = customPrompt.trim();
         setGeneratedImages({ [prompt]: { status: 'pending' } });
 
+        let wasSuccessful = false;
         try {
             const token = await getAuthToken();
             const fullPrompt = `Change the style of this photograph to look like: ${prompt}. Adapt the original photo to match the new style, but keep the person's face recognizable.`;
             const resultUrl = await generateStyledImage(uploadedImage, fullPrompt, token);
             const watermarkedUrl = await addWatermark(resultUrl);
             setGeneratedImages({ [prompt]: { status: 'done', url: watermarkedUrl } });
+            wasSuccessful = true;
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
             setGeneratedImages({ [prompt]: { status: 'error', error: errorMessage } });
             console.error(`Failed to generate custom image for prompt "${prompt}":`, err);
+        }
+
+        // If the image was made, and we haven't charged for this upload yet, deduct a credit.
+        if (wasSuccessful && !creditUsedForCurrentImage) {
+            try {
+                const token = await getAuthToken();
+                const { credits: newCredits } = await deductUserCredit(token);
+                setCredits(newCredits);
+                setCreditUsedForCurrentImage(true);
+            } catch (error) {
+                console.error(
+                    "Critical: Failed to deduct credit after a successful generation. " +
+                    "The user has received a free generation for this image upload. " +
+                    "Marking credit as used on the client to prevent further free generations.",
+                    error
+                );
+                // Mark as used anyway to prevent abuse.
+                setCreditUsedForCurrentImage(true);
+            }
         }
 
         setAppState('results-shown');
@@ -243,6 +328,7 @@ function App() {
         setGeneratedImages({});
         setAppState('idle');
         setCustomPrompt('');
+        setCreditUsedForCurrentImage(false);
     };
 
     const handleDownloadIndividualImage = (prompt: string) => {
@@ -299,6 +385,7 @@ function App() {
         .filter(image => image.status === 'done' && image.url)
         .map(image => ({ url: image.url!, caption: image.caption }));
 
+    const hasNoCredits = credits !== null && credits <= 0;
 
     return (
         <main className="bg-[#FFF9E8] text-stone-800 min-h-screen w-full flex flex-col items-center justify-center p-4 pb-32 overflow-hidden relative">
@@ -318,7 +405,7 @@ function App() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5 }}
-                        className="flex flex-col items-center gap-6"
+                        className="flex flex-col items-center gap-6 w-full"
                     >
                          <p className="font-permanent-marker text-stone-500 text-center max-w-sm text-lg">
                             Log in to start your journey through time and generate your own retro photo album.
@@ -354,6 +441,20 @@ function App() {
                              transition={{ delay: 2, duration: 0.8, type: 'spring' }}
                              className="flex flex-col items-center"
                         >
+                            {user?.name && (
+                                <div className="text-center mb-4">
+                                    <p className="font-permanent-marker text-stone-600 text-2xl" aria-live="polite">
+                                        Welcome, {user.name.split(' ')[0]}!
+                                    </p>
+                                    {creditsLoading ? (
+                                        <p className="font-permanent-marker text-stone-500 text-lg animate-pulse">Checking credits...</p>
+                                    ) : credits !== null && (
+                                        <p className="font-permanent-marker text-teal-600 text-lg">
+                                            You have {credits} credit{credits === 1 ? '' : 's'} left.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                             <label htmlFor="file-upload" className="cursor-pointer group transform hover:scale-105 transition-transform duration-300">
                                  <PolaroidCard 
                                      caption={isProcessingUpload ? "Processing..." : "Click to begin"}
@@ -381,9 +482,10 @@ function App() {
                             status="done"
                          />
                          <div className="w-full flex flex-col items-center gap-4">
-                            <button onClick={handleGenerateTimeline} className={primaryButtonClasses}>
+                            <button onClick={handleGenerateTimeline} disabled={creditsLoading || hasNoCredits} className={primaryButtonClasses}>
                                 Generate Timeline
                             </button>
+                            {hasNoCredits && <p className="text-red-600 font-permanent-marker -mt-2">You are out of credits!</p>}
 
                             <div className="w-full text-center my-2">
                                 <span className="font-permanent-marker text-stone-500 text-lg">OR</span>
@@ -399,7 +501,7 @@ function App() {
                                         placeholder="e.g., An oil painting, a futuristic robot..."
                                         className="w-full px-3 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
                                     />
-                                    <button onClick={handleGenerateCustom} disabled={!customPrompt.trim()} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
+                                    <button onClick={handleGenerateCustom} disabled={!customPrompt.trim() || creditsLoading || hasNoCredits} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
                                         Go
                                     </button>
                                 </div>
@@ -504,7 +606,7 @@ function App() {
                 )}
             </AnimatePresence>
             
-            <Footer />
+            <Footer useAuthHook={useAuthHook} />
         </main>
     );
 }

@@ -17,8 +17,7 @@
     "clsx": "^2.1.1",
     "heic2any": "^0.0.4",
     "@netlify/functions": "^2.7.0",
-    "@auth0/auth0-react": "^2.2.4",
-    "netlify-identity-widget": "^1.9.2"
+    "@auth0/auth0-react": "^2.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
