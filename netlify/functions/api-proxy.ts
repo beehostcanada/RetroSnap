@@ -6,6 +6,24 @@ import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 
+/**
+ * Retrieves a user's credits from the KV store. If the user doesn't exist,
+ * it initializes them with 3 credits.
+ * @param store The Netlify KV store instance.
+ * @param userId The unique identifier for the user.
+ * @returns A promise that resolves to the user's credit balance.
+ */
+async function getOrCreateUserCredits(store: any, userId: string): Promise<number> {
+    let credits = await store.get(userId);
+    if (credits === null) {
+        // New user, initialize with 3 credits.
+        await store.set(userId, 3);
+        return 3;
+    }
+    return Number(credits);
+}
+
+
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
     const { AUTH0_DOMAIN, API_KEY, CONTEXT } = process.env;
 
@@ -79,35 +97,34 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 
     // Handle GET and POST requests to the /credits endpoint
     if (requestPath === 'credits') {
-        if (event.httpMethod === 'GET') {
-            let credits = await creditsStore.get(userIdentifier);
-            if (credits === null) {
-                await creditsStore.set(userIdentifier, 3);
-                credits = 3;
+        try {
+            if (event.httpMethod === 'GET') {
+                const credits = await getOrCreateUserCredits(creditsStore, userIdentifier);
+                return { statusCode: 200, body: JSON.stringify({ credits }) };
             }
-            return { statusCode: 200, body: JSON.stringify({ credits: Number(credits) }) };
-        }
 
-        if (event.httpMethod === 'POST') {
-            if (isDevRequest) {
-                return { statusCode: 200, body: JSON.stringify({ credits: 999 }) }; // Dev user has "infinite" credits
-            }
-            let credits = await creditsStore.get(userIdentifier);
-            if (credits === null) {
-                await creditsStore.set(userIdentifier, 2); // First-time use, 1 of 3 initial credits used.
-                return { statusCode: 200, body: JSON.stringify({ credits: 2 }) };
-            }
-            const numericCredits = Number(credits);
-            if (numericCredits <= 0) {
-                return { statusCode: 402, body: JSON.stringify({ error: "You are out of credits." }) }; // 402 Payment Required
-            }
-            const newCredits = numericCredits - 1;
-            await creditsStore.set(userIdentifier, newCredits);
-            return { statusCode: 200, body: JSON.stringify({ credits: newCredits }) };
-        }
+            if (event.httpMethod === 'POST') {
+                if (isDevRequest) {
+                    return { statusCode: 200, body: JSON.stringify({ credits: 999 }) }; // Dev user has "infinite" credits
+                }
+                
+                const currentCredits = await getOrCreateUserCredits(creditsStore, userIdentifier);
 
-        // Return Method Not Allowed for other methods on /credits
-        return { statusCode: 405, body: JSON.stringify({ error: `Method ${event.httpMethod} Not Allowed on /credits` }) };
+                if (currentCredits <= 0) {
+                    return { statusCode: 402, body: JSON.stringify({ error: "You are out of credits." }) }; // 402 Payment Required
+                }
+
+                const newCredits = currentCredits - 1;
+                await creditsStore.set(userIdentifier, newCredits);
+                return { statusCode: 200, body: JSON.stringify({ credits: newCredits }) };
+            }
+
+            // Return Method Not Allowed for other methods on /credits
+            return { statusCode: 405, body: JSON.stringify({ error: `Method ${event.httpMethod} Not Allowed on /credits` }) };
+        } catch (kvError) {
+             console.error("Error accessing KV Store for credits:", kvError);
+             return { statusCode: 500, body: JSON.stringify({ error: "An error occurred with the credit system." }) };
+        }
     }
 
     // --- DEFAULT: PROXY TO GEMINI API ---
