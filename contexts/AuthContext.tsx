@@ -46,44 +46,52 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const [status, setStatus] = useState<Status>('pending');
     const [error, setError] = useState<Error | null>(null);
 
-    // This single effect orchestrates the entire session verification and data loading process,
-    // making it resilient to the auth provider's race conditions.
+    // This single effect orchestrates the entire session verification and data loading process.
+    // It's architected to be resilient to race conditions and to clearly distinguish between
+    // a "logged out" state and a true application error.
     useEffect(() => {
         if (isMock) {
             setStatus('success');
             return;
         }
 
-        if (!auth.isLoading) {
-            const verifySessionAndFetchData = async () => {
-                setStatus('loading');
-                setError(null); // Clear previous errors on a new attempt.
-                try {
-                    const token = await auth.getAccessTokenSilently();
-                    const data = await getCredits(token);
-                    setCredits(data.credits);
-                    setIsAdmin(data.isAdmin);
-                    setStatus('success');
-                } catch (err: any) {
-                    console.error("Session verification or data fetch failed:", err);
-                    setCredits(null);
-                    setIsAdmin(false);
+        const verifySessionAndFetchData = async () => {
+            setStatus('loading');
+            setError(null); // Clear previous errors on a new attempt.
 
-                    // Distinguish between a user who isn't logged in vs. a real configuration error.
-                    // 'login_required' is a normal state, not an application error.
-                    if (err?.error === 'login_required') {
-                        setError(null);
-                        setStatus('success'); // Successfully determined user is logged out.
-                    } else {
-                        // Any other error is unexpected and should be surfaced to the user.
-                        setError(err as Error);
-                        setStatus('error');
-                    }
-                }
-            };
+            // If Auth0 says we are not authenticated, that is our source of truth.
+            // We consider this a 'success' in determining the user's state (they are logged out).
+            if (!auth.isAuthenticated) {
+                setCredits(null);
+                setIsAdmin(false);
+                setStatus('success');
+                return;
+            }
+
+            // If we reach here, Auth0 believes the user IS authenticated.
+            // Any failure from this point on is a critical application error (e.g., backend misconfiguration).
+            try {
+                const token = await auth.getAccessTokenSilently();
+                const data = await getCredits(token);
+                setCredits(data.credits);
+                setIsAdmin(data.isAdmin);
+                setStatus('success');
+            } catch (err: any) {
+                console.error("Critical error during authenticated data fetch:", err);
+                // The error is guaranteed to be a real problem, not a login issue.
+                // We set the error state so UI components like AdminPage can display it.
+                setError(err as Error);
+                setStatus('error');
+                setCredits(null);
+                setIsAdmin(false);
+            }
+        };
+
+        // We only run the verification logic once the Auth0 SDK is finished loading.
+        if (!auth.isLoading) {
             verifySessionAndFetchData();
         }
-    }, [auth.isLoading, auth.getAccessTokenSilently, isMock]);
+    }, [auth.isLoading, auth.isAuthenticated, auth.getAccessTokenSilently, isMock]);
 
 
     // This function is for MANUAL refreshes (e.g., after an action).

@@ -81,7 +81,7 @@ const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number):
 };
 
 function App() {
-    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently, credits, fetchUserData } = useUserContext();
+    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently, credits, fetchUserData, error } = useUserContext();
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -342,6 +342,241 @@ function App() {
     const hasNoCredits = credits !== null && credits <= 0;
     const cannotGenerate = hasNoCredits && !paidForCurrentImage;
 
+    const renderContent = () => {
+        if (isLoading) {
+            return <div className="font-permanent-marker text-stone-500 text-lg">Loading...</div>;
+        }
+
+        if (error) {
+            return (
+                <div className="text-center bg-red-100 border border-red-400 text-red-800 p-6 rounded-lg max-w-2xl mx-auto shadow-lg">
+                    <h2 className="text-3xl font-bold mb-4 font-permanent-marker">Application Error</h2>
+                    <p className="mb-4 font-sans">
+                        The application could not load critical user data after logging in. This is usually caused by a server-side configuration issue.
+                    </p>
+                    <p className="text-sm mb-6 font-sans text-stone-700">
+                        Please check the setup guide and verify your environment variables. The error details below may point to an issue with either your <strong>Auth0 API settings</strong> (e.g., Audience) or your <strong>Google Cloud/Firestore permissions</strong> (e.g., incorrect service account key or permissions).
+                    </p>
+                    <details className="text-left bg-stone-50 p-3 rounded font-sans">
+                        <summary className="cursor-pointer text-stone-800">Technical Details</summary>
+                        <pre className="text-xs text-stone-600 whitespace-pre-wrap mt-2 overflow-x-auto">
+                            {error.message || 'No additional details provided.'}
+                        </pre>
+                    </details>
+                </div>
+            );
+        }
+        
+        if (!isAuthenticated) {
+            return (
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="flex flex-col items-center gap-6 w-full"
+                >
+                     <p className="font-permanent-marker text-stone-500 text-center max-w-sm text-lg">
+                        Log in to start your journey through time and generate your own retro photo album.
+                     </p>
+                    <button onClick={() => loginWithRedirect()} className={primaryButtonClasses}>
+                        Login
+                    </button>
+                </motion.div>
+            );
+        }
+        
+        // --- Authenticated User Content ---
+        if (appState === 'idle') {
+            return (
+                <div className="relative flex flex-col items-center justify-center w-full">
+                   {GHOST_POLAROIDS_CONFIG.map((config, index) => (
+                        <motion.div
+                           key={index}
+                           className="absolute w-80 h-[26rem] rounded-md p-4 bg-stone-500/20 blur-sm"
+                           initial={config.initial}
+                           animate={{
+                               x: "0%", y: "0%", rotate: (Math.random() - 0.5) * 20,
+                               scale: 0,
+                               opacity: 0,
+                           }}
+                           transition={{
+                               ...config.transition,
+                               ease: "circOut",
+                               duration: 2,
+                           }}
+                       />
+                   ))}
+                   <motion.div
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ delay: 2, duration: 0.8, type: 'spring' }}
+                        className="flex flex-col items-center"
+                   >
+                       {user?.name && (
+                           <div className="text-center mb-4">
+                               <p className="font-permanent-marker text-stone-600 text-2xl" aria-live="polite">
+                                   Welcome, {user.name.split(' ')[0]}!
+                               </p>
+                               {credits !== null ? (
+                                   <p className="font-permanent-marker text-teal-600 text-lg">
+                                       You have {credits} credit{credits === 1 ? '' : 's'} left.
+                                   </p>
+                               ) : (
+                                   <p className="font-permanent-marker text-stone-500 text-lg animate-pulse">Checking credits...</p>
+                               )}
+                           </div>
+                       )}
+                       <label htmlFor="file-upload" className="cursor-pointer group transform hover:scale-105 transition-transform duration-300">
+                            <PolaroidCard 
+                                caption={isProcessingUpload ? "Processing..." : "Click to begin"}
+                                status={isProcessingUpload ? 'pending' : 'done'}
+                            />
+                       </label>
+                       <input id="file-upload" type="file" className="hidden" accept="image/png, image/jpeg, image/webp, image/heic, image/heif" onChange={handleImageUpload} />
+                       <p className="mt-8 font-permanent-marker text-stone-500 text-center max-w-xs text-lg">
+                           Click the polaroid to upload your photo and start your journey through time.
+                       </p>
+                   </motion.div>
+               </div>
+            );
+        }
+
+        if (appState === 'image-uploaded' && uploadedImage) {
+             return (
+                <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="flex flex-col items-center gap-8 w-full max-w-lg"
+                >
+                     <PolaroidCard 
+                        imageUrl={uploadedImage} 
+                        caption="Your Photo" 
+                        status="done"
+                     />
+                     <div className="w-full flex flex-col items-center gap-4">
+                        <button onClick={handleGenerateTimeline} disabled={cannotGenerate} className={primaryButtonClasses}>
+                            Generate Timeline
+                        </button>
+                        {cannotGenerate && (
+                            <p className="text-red-600 font-permanent-marker -mt-2">
+                                You are out of credits!
+                            </p>
+                        )}
+
+                        <div className="w-full text-center my-2">
+                            <span className="font-permanent-marker text-stone-500 text-lg">OR</span>
+                        </div>
+
+                        <div className="w-full bg-stone-50/50 p-4 rounded-md border border-stone-200">
+                            <p className="font-permanent-marker text-stone-600 text-center text-lg mb-3">Try a Custom Style</p>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text"
+                                    value={customPrompt}
+                                    onChange={(e) => setCustomPrompt(e.target.value)}
+                                    placeholder="e.g., An oil painting, a futuristic robot..."
+                                    className="w-full px-3 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
+                                />
+                                <button onClick={handleGenerateCustom} disabled={!customPrompt.trim() || cannotGenerate} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
+                                    Go
+                                </button>
+                            </div>
+                            <div className="mt-3 flex flex-wrap justify-center gap-2">
+                                {INSPIRATION_PROMPTS.map(prompt => (
+                                    <button key={prompt} onClick={() => setCustomPrompt(prompt)} className={inspirationButtonClasses}>
+                                        {prompt}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                     </div>
+                     <button onClick={handleReset} className={`${secondaryButtonClasses} mt-4`}>
+                        Different Photo
+                    </button>
+                </motion.div>
+            );
+        }
+        
+        if (appState === 'generating' || appState === 'results-shown') {
+            return (
+                <div className="w-full max-w-5xl flex flex-col items-center">
+                   {generatedKeys.length > 1 ? (
+                       <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 p-4">
+                           {DECADES.map((decade) => (
+                               <div key={decade} className="flex justify-center">
+                                   <PolaroidCard
+                                       caption={decade}
+                                       status={generatedImages[decade]?.status || 'pending'}
+                                       imageUrl={generatedImages[decade]?.url}
+                                       error={generatedImages[decade]?.error}
+                                       onRegenerate={handleRegenerate}
+                                       onDownload={handleDownloadIndividualImage}
+                                       onCardClick={
+                                           generatedImages[decade]?.status === 'done' && generatedImages[decade]?.url ?
+                                           () => {
+                                               const successfulIndex = successfulImages.findIndex(img => img.caption === decade);
+                                               if (successfulIndex > -1) {
+                                                   setSlideshowStartIndex(successfulIndex);
+                                                   setSlideshowOpen(true);
+                                               }
+                                           } : undefined
+                                       }
+                                   />
+                               </div>
+                           ))}
+                       </div>
+                   ) : (
+                       <div className="flex justify-center p-4">
+                           {generatedKeys.map((key) => (
+                               <PolaroidCard
+                                   key={key}
+                                   caption={key}
+                                   status={generatedImages[key]?.status || 'pending'}
+                                   imageUrl={generatedImages[key]?.url}
+                                   error={generatedImages[key]?.error}
+                                   onRegenerate={handleRegenerate}
+                                   onDownload={handleDownloadIndividualImage}
+                               />
+                           ))}
+                       </div>
+                   )}
+                    <div className="h-20 mt-8 flex items-center justify-center">
+                       {appState === 'results-shown' && (
+                           <div className="flex flex-col sm:flex-row items-center gap-4">
+                               {generatedKeys.length > 1 && (
+                                   <button 
+                                       onClick={handleDownloadAlbum} 
+                                       disabled={isDownloading} 
+                                       className={`${primaryButtonClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                   >
+                                       {isDownloading ? 'Creating Album...' : 'Download Album'}
+                                   </button>
+                               )}
+                                {successfulImages.length > 1 && (
+                                   <button 
+                                       onClick={() => {
+                                           setSlideshowStartIndex(0);
+                                           setSlideshowOpen(true);
+                                       }} 
+                                       className={secondaryButtonClasses}
+                                   >
+                                       Slideshow
+                                   </button>
+                               )}
+                               <button onClick={handleReset} className={secondaryButtonClasses}>
+                                   Start Over
+                               </button>
+                           </div>
+                       )}
+                   </div>
+               </div>
+           );
+        }
+
+        return null; // Should not be reached
+    };
+
     return (
         <main className="bg-[#FFF9E8] text-stone-800 min-h-screen w-full flex flex-col items-center justify-center p-4 pb-32 overflow-hidden relative">
             
@@ -350,208 +585,7 @@ function App() {
                     <h1 className="text-4xl sm:text-5xl md:text-7xl font-caveat font-bold text-rainbow">RetroSnap</h1>
                     <p className="font-permanent-marker text-stone-600 mt-2 text-xl tracking-wide">Snap photos through the years and reminisce.</p>
                 </div>
-
-                {isLoading && (
-                    <div className="font-permanent-marker text-stone-500 text-lg">Loading...</div>
-                )}
-                
-                {!isLoading && !isAuthenticated && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5 }}
-                        className="flex flex-col items-center gap-6 w-full"
-                    >
-                         <p className="font-permanent-marker text-stone-500 text-center max-w-sm text-lg">
-                            Log in to start your journey through time and generate your own retro photo album.
-                         </p>
-                        <button onClick={() => loginWithRedirect()} className={primaryButtonClasses}>
-                            Login
-                        </button>
-                    </motion.div>
-                )}
-
-                {isAuthenticated && appState === 'idle' && (
-                     <div className="relative flex flex-col items-center justify-center w-full">
-                        {GHOST_POLAROIDS_CONFIG.map((config, index) => (
-                             <motion.div
-                                key={index}
-                                className="absolute w-80 h-[26rem] rounded-md p-4 bg-stone-500/20 blur-sm"
-                                initial={config.initial}
-                                animate={{
-                                    x: "0%", y: "0%", rotate: (Math.random() - 0.5) * 20,
-                                    scale: 0,
-                                    opacity: 0,
-                                }}
-                                transition={{
-                                    ...config.transition,
-                                    ease: "circOut",
-                                    duration: 2,
-                                }}
-                            />
-                        ))}
-                        <motion.div
-                             initial={{ opacity: 0, scale: 0.8 }}
-                             animate={{ opacity: 1, scale: 1 }}
-                             transition={{ delay: 2, duration: 0.8, type: 'spring' }}
-                             className="flex flex-col items-center"
-                        >
-                            {user?.name && (
-                                <div className="text-center mb-4">
-                                    <p className="font-permanent-marker text-stone-600 text-2xl" aria-live="polite">
-                                        Welcome, {user.name.split(' ')[0]}!
-                                    </p>
-                                    {credits !== null ? (
-                                        <p className="font-permanent-marker text-teal-600 text-lg">
-                                            You have {credits} credit{credits === 1 ? '' : 's'} left.
-                                        </p>
-                                    ) : (
-                                        <p className="font-permanent-marker text-stone-500 text-lg animate-pulse">Checking credits...</p>
-                                    )}
-                                </div>
-                            )}
-                            <label htmlFor="file-upload" className="cursor-pointer group transform hover:scale-105 transition-transform duration-300">
-                                 <PolaroidCard 
-                                     caption={isProcessingUpload ? "Processing..." : "Click to begin"}
-                                     status={isProcessingUpload ? 'pending' : 'done'}
-                                 />
-                            </label>
-                            <input id="file-upload" type="file" className="hidden" accept="image/png, image/jpeg, image/webp, image/heic, image/heif" onChange={handleImageUpload} />
-                            <p className="mt-8 font-permanent-marker text-stone-500 text-center max-w-xs text-lg">
-                                Click the polaroid to upload your photo and start your journey through time.
-                            </p>
-                        </motion.div>
-                    </div>
-                )}
-
-                {isAuthenticated && appState === 'image-uploaded' && uploadedImage && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5 }}
-                        className="flex flex-col items-center gap-8 w-full max-w-lg"
-                    >
-                         <PolaroidCard 
-                            imageUrl={uploadedImage} 
-                            caption="Your Photo" 
-                            status="done"
-                         />
-                         <div className="w-full flex flex-col items-center gap-4">
-                            <button onClick={handleGenerateTimeline} disabled={cannotGenerate} className={primaryButtonClasses}>
-                                Generate Timeline
-                            </button>
-                            {cannotGenerate && (
-                                <p className="text-red-600 font-permanent-marker -mt-2">
-                                    You are out of credits!
-                                </p>
-                            )}
-
-                            <div className="w-full text-center my-2">
-                                <span className="font-permanent-marker text-stone-500 text-lg">OR</span>
-                            </div>
-
-                            <div className="w-full bg-stone-50/50 p-4 rounded-md border border-stone-200">
-                                <p className="font-permanent-marker text-stone-600 text-center text-lg mb-3">Try a Custom Style</p>
-                                <div className="flex gap-2">
-                                    <input 
-                                        type="text"
-                                        value={customPrompt}
-                                        onChange={(e) => setCustomPrompt(e.target.value)}
-                                        placeholder="e.g., An oil painting, a futuristic robot..."
-                                        className="w-full px-3 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-                                    />
-                                    <button onClick={handleGenerateCustom} disabled={!customPrompt.trim() || cannotGenerate} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
-                                        Go
-                                    </button>
-                                </div>
-                                <div className="mt-3 flex flex-wrap justify-center gap-2">
-                                    {INSPIRATION_PROMPTS.map(prompt => (
-                                        <button key={prompt} onClick={() => setCustomPrompt(prompt)} className={inspirationButtonClasses}>
-                                            {prompt}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                         </div>
-                         <button onClick={handleReset} className={`${secondaryButtonClasses} mt-4`}>
-                            Different Photo
-                        </button>
-                    </motion.div>
-                )}
-
-                {isAuthenticated && (appState === 'generating' || appState === 'results-shown') && (
-                     <div className="w-full max-w-5xl flex flex-col items-center">
-                        {generatedKeys.length > 1 ? (
-                            <div className="w-full grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 p-4">
-                                {DECADES.map((decade) => (
-                                    <div key={decade} className="flex justify-center">
-                                        <PolaroidCard
-                                            caption={decade}
-                                            status={generatedImages[decade]?.status || 'pending'}
-                                            imageUrl={generatedImages[decade]?.url}
-                                            error={generatedImages[decade]?.error}
-                                            onRegenerate={handleRegenerate}
-                                            onDownload={handleDownloadIndividualImage}
-                                            onCardClick={
-                                                generatedImages[decade]?.status === 'done' && generatedImages[decade]?.url ?
-                                                () => {
-                                                    const successfulIndex = successfulImages.findIndex(img => img.caption === decade);
-                                                    if (successfulIndex > -1) {
-                                                        setSlideshowStartIndex(successfulIndex);
-                                                        setSlideshowOpen(true);
-                                                    }
-                                                } : undefined
-                                            }
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="flex justify-center p-4">
-                                {generatedKeys.map((key) => (
-                                    <PolaroidCard
-                                        key={key}
-                                        caption={key}
-                                        status={generatedImages[key]?.status || 'pending'}
-                                        imageUrl={generatedImages[key]?.url}
-                                        error={generatedImages[key]?.error}
-                                        onRegenerate={handleRegenerate}
-                                        onDownload={handleDownloadIndividualImage}
-                                    />
-                                ))}
-                            </div>
-                        )}
-                         <div className="h-20 mt-8 flex items-center justify-center">
-                            {appState === 'results-shown' && (
-                                <div className="flex flex-col sm:flex-row items-center gap-4">
-                                    {generatedKeys.length > 1 && (
-                                        <button 
-                                            onClick={handleDownloadAlbum} 
-                                            disabled={isDownloading} 
-                                            className={`${primaryButtonClasses} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                        >
-                                            {isDownloading ? 'Creating Album...' : 'Download Album'}
-                                        </button>
-                                    )}
-                                     {successfulImages.length > 1 && (
-                                        <button 
-                                            onClick={() => {
-                                                setSlideshowStartIndex(0);
-                                                setSlideshowOpen(true);
-                                            }} 
-                                            className={secondaryButtonClasses}
-                                        >
-                                            Slideshow
-                                        </button>
-                                    )}
-                                    <button onClick={handleReset} className={secondaryButtonClasses}>
-                                        Start Over
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+                {renderContent()}
             </div>
 
             <AnimatePresence>

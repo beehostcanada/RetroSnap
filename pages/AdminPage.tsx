@@ -48,7 +48,7 @@ const AdminPage = () => {
                 <div className="text-center bg-red-900/50 border border-red-700 p-6 rounded-lg max-w-2xl">
                     <h1 className="text-3xl font-bold mb-4 text-red-400">Application Configuration Error</h1>
                     <p className="text-slate-300 mb-4">
-                        The application could not load critical data. This is usually caused by a server-side configuration issue.
+                        The application could not load critical user data after logging in. This is usually caused by a server-side configuration issue.
                     </p>
                     <p className="text-slate-400 text-sm mb-6">
                         Please check the setup guide and verify your environment variables. The error details below may point to an issue with either your <strong>Auth0 API settings</strong> (e.g., Audience) or your <strong>Google Cloud/Firestore permissions</strong> (e.g., incorrect service account key or permissions).
