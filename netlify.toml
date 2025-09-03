@@ -1,0 +1,17 @@
+# This rule proxies requests from the browser at /api-proxy/...
+# to the serverless function located at /.netlify/functions/api-proxy.
+# This must come first as it's more specific than the SPA rule below.
+[[redirects]]
+  from = "/api-proxy/*"
+  to = "/.netlify/functions/api-proxy/:splat"
+  status = 200
+
+# This is the standard Single-Page Application (SPA) fallback rule.
+# It ensures that any request not matching a file or the proxy rule above
+# (like a direct link to /admin) serves the main index.html file.
+# This allows React Router to handle the client-side navigation.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
