@@ -24,7 +24,7 @@ const Footer = () => {
                                 onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                                 className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200"
                             >
-                                Logout
+                                Logout1
                             </button>
                         </div>
                     )}
