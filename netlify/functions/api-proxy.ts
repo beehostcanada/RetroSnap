@@ -125,10 +125,13 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             
             // GET /admin/users - List all users and their credits
             if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
-                const { keys } = await creditsStore.list();
+                const listResult = await creditsStore.list();
+                const keys = listResult?.keys || []; // Safely access keys
+
                 const users = await Promise.all(
                     keys.map(async ({ name }: { name: string }) => {
                         const credits = await creditsStore.get(name);
+                        // Safely parse credits, defaulting to 0 if invalid.
                         return { email: name, credits: parseInt(credits as any, 10) || 0 };
                     })
                 );
@@ -158,33 +161,38 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         } catch (kvError) {
             console.error("Error with KV Store for admin action:", kvError);
             
-            // Graceful fallback for local development when Netlify's KV store isn't available.
-            console.warn("Assuming local dev mode and returning mock data for admin panel due to KV store error.");
+            const isStoreUnavailable = kvError instanceof Error && kvError.message.includes("KV Store not available");
 
-            if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
-                const mockUsers = [
-                    { email: 'user1@example.com', credits: 5 },
-                    { email: 'user2@example.com', credits: 1 },
-                    { email: 'admin@example.com', credits: 999 },
-                ];
-                return { statusCode: 200, body: JSON.stringify(mockUsers) };
-            }
+            // Only fall back to mock data if the store is explicitly unavailable (local dev without Netlify CLI).
+            if (isStoreUnavailable) {
+                console.warn("KV Store unavailable. Assuming local dev mode and returning mock data for admin panel.");
 
-            if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
-                 if (!event.body) {
-                    return { statusCode: 400, body: JSON.stringify({ error: "Request body is missing." }) };
+                if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
+                    const mockUsers = [
+                        { email: 'user1@example.com', credits: 5 },
+                        { email: 'user2@example.com', credits: 1 },
+                        { email: 'admin@example.com', credits: 999 },
+                    ];
+                    return { statusCode: 200, body: JSON.stringify(mockUsers) };
                 }
-                try {
-                    const { email } = JSON.parse(event.body);
-                    // In mock mode, pretend it worked and return a static number.
-                    console.log(`Mock-adding credits to ${email}.`);
-                    return { statusCode: 200, body: JSON.stringify({ credits: 10 }) };
-                } catch (parseError) {
-                    return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON in request body." }) };
+
+                if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
+                    if (!event.body) {
+                        return { statusCode: 400, body: JSON.stringify({ error: "Request body is missing." }) };
+                    }
+                    try {
+                        const { email } = JSON.parse(event.body);
+                        console.log(`Mock-adding credits to ${email}.`);
+                        return { statusCode: 200, body: JSON.stringify({ credits: 10 }) };
+                    } catch (parseError) {
+                        return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON in request body." }) };
+                    }
                 }
             }
             
-            return { statusCode: 500, body: JSON.stringify({ error: "An error occurred with the credit system." }) };
+            // For all other errors (likely on the live site), return a specific server error.
+            const errorMessage = kvError instanceof Error ? kvError.message : "An unknown KV store error occurred.";
+            return { statusCode: 500, body: JSON.stringify({ error: `Database error: ${errorMessage}` }) };
         }
     }
 
