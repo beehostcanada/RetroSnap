@@ -37,14 +37,13 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const auth = useAuthHook();
     const isMock = useAuthHook !== useAuth0;
     
-    // If using mock, state comes directly from it. If not, it's fetched from the backend.
     const [credits, setCredits] = useState<number | null>(isMock ? auth.credits : null);
     const [isAdmin, setIsAdmin] = useState<boolean>(isMock ? auth.isAdmin : false);
+    const [isUserDataLoading, setIsUserDataLoading] = useState<boolean>(!isMock);
 
     const fetchUserData = useCallback(async () => {
-        // Never fetch from the API if using the mock provider.
-        // The user data is static and set during initial state.
         if (isMock) {
+            setIsUserDataLoading(false);
             return;
         }
 
@@ -56,21 +55,30 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
                 setIsAdmin(data.isAdmin);
             } catch (error) {
                 console.error("Failed to fetch user data:", error);
-                // In case of error, reset to safe defaults
                 setCredits(0);
                 setIsAdmin(false);
+            } finally {
+                setIsUserDataLoading(false);
             }
+        } else {
+            // If user is not authenticated, we are not loading their data.
+            setIsUserDataLoading(false);
         }
     }, [isMock, auth.isAuthenticated, auth.getAccessTokenSilently]);
 
     useEffect(() => {
-        fetchUserData();
-    }, [fetchUserData]);
+        // Fetch user data only when Auth0 is done authenticating.
+        if (!auth.isLoading) {
+            fetchUserData();
+        }
+    }, [auth.isLoading, fetchUserData]);
 
     const value: UserContextType = {
         user: auth.user,
         isAuthenticated: auth.isAuthenticated,
-        isLoading: auth.isLoading,
+        // The app is considered "loading" if Auth0 is loading, or if we've authenticated
+        // but haven't finished fetching our own user data (credits, admin status).
+        isLoading: auth.isLoading || (auth.isAuthenticated && isUserDataLoading),
         credits,
         isAdmin,
         loginWithRedirect: auth.loginWithRedirect,
