@@ -8,10 +8,11 @@ import { useUserContext } from '../contexts/AuthContext';
 
 
 const Footer = () => {
-    const { user, isAuthenticated, isLoading, isUserDataLoading, isAdmin, logout } = useUserContext();
+    const { user, isAuthenticated, isLoading, isAdmin, logout } = useUserContext();
     
-    // Only show the admin link when all loading is complete and the user is confirmed to be an admin.
-    const showAdminLink = !isLoading && !isUserDataLoading && isAdmin;
+    // This logic is now robust. The link will only be shown after all loading is complete
+    // and the user has been confirmed to be an admin.
+    const showAdminLink = !isLoading && isAdmin;
 
     return (
         <footer className="fixed bottom-0 left-0 right-0 bg-sky-600 p-3 z-50 text-sky-100 text-xs sm:text-sm border-t border-sky-300">

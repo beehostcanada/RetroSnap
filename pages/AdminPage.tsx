@@ -28,7 +28,7 @@ const LockIcon = () => (
 
 
 const AdminPage = () => {
-    const { isAuthenticated, isLoading, isUserDataLoading, isAdmin } = useUserContext();
+    const { isAuthenticated, isLoading, isAdmin } = useUserContext();
     const navigate = useNavigate();
     const [isExpanded, setIsExpanded] = useState(true); // Keep the single item expanded by default
 
@@ -39,11 +39,12 @@ const AdminPage = () => {
     }, [isLoading, isAuthenticated, navigate]);
     
     const renderContent = () => {
-        // Wait until both Auth0 and our user data have finished loading.
-        if (isLoading || isUserDataLoading) {
+        // Use the single, reliable isLoading flag.
+        if (isLoading) {
             return <div className="text-center text-slate-400 text-lg animate-pulse">Loading Admin Panel...</div>;
         }
 
+        // This check now only happens *after* all loading is complete.
         if (!isAdmin) {
             return (
                 <div className="text-center">
