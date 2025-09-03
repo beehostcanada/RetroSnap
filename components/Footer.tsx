@@ -11,7 +11,7 @@ interface FooterProps {
 }
 
 // IMPORTANT: This list must be kept in sync with the one in `netlify/functions/api-proxy.ts`
-const ADMIN_USERS = ['admin@example.com'];
+const ADMIN_USERS = ['ajbatac@gmail.com'];
 
 const Footer = ({ useAuthHook = useAuth0 }: FooterProps) => {
     const { user, isAuthenticated, logout } = useAuthHook();
