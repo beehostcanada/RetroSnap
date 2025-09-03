@@ -3,14 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
-// FIX: Import `FieldValue` to use for atomic server-side operations.
-import { Firestore, FieldValue } from '@google-cloud/firestore';
+// Use require for compatibility with different Node module resolution strategies in serverless environments.
+const { Firestore } = require('@google-cloud/firestore');
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 const INITIAL_CREDITS = 3;
 
 // --- Firestore Client Initialization ---
-let firestore: Firestore | null = null;
+// FIX: 'Firestore' from require() is a value, but was used as a type. Using an import type to get the Firestore instance type.
+let firestore: import('@google-cloud/firestore').Firestore | null = null;
 const initializeFirestore = () => {
     if (firestore) {
         return;
@@ -214,12 +215,18 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
                 return { statusCode: geminiResponse.status, body: responseBody };
             }
 
-            // Deduct credit on success
+            // Deduct credit on success using a transaction for atomicity
             if (!firestore) throw new Error("Firestore not initialized.");
-            await firestore.collection('users').doc(userEmail).update({
-                // FIX: Use `FieldValue.increment` for atomic updates. `FieldValue` is not a static property of `Firestore`.
-                credits: FieldValue.increment(-1)
+            const userRef = firestore.collection('users').doc(userEmail);
+            await firestore.runTransaction(async (transaction: any) => {
+                const userDoc = await transaction.get(userRef);
+                if (!userDoc.exists) {
+                    return; // Should not happen if user was fetched before, but good to handle.
+                }
+                const newCredits = Math.max(0, (userDoc.data()?.credits || 0) - 1);
+                transaction.update(userRef, { credits: newCredits });
             });
+
 
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: responseBody };
 

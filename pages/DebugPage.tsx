@@ -82,8 +82,8 @@ const DebugPage = () => {
             );
         }
 
-        if (!debugInfo) {
-            return <p className="text-center text-slate-400">No debug information available.</p>;
+        if (!debugInfo || !debugInfo.adminCheck) {
+            return <p className="text-center text-slate-400">No debug information available or response is malformed.</p>;
         }
 
         const { adminCheck } = debugInfo;
