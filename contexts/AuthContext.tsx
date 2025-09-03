@@ -44,50 +44,50 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const [isAdmin, setIsAdmin] = useState<boolean>(isMock ? auth.isAdmin : false);
     const [status, setStatus] = useState<Status>('pending');
 
-    // This effect handles the crucial INITIAL data load and is designed
-    // to be resilient to the auth provider's race conditions.
+    // This single effect orchestrates the entire session verification and data loading process,
+    // making it resilient to the auth provider's race conditions.
     useEffect(() => {
-        // While Auth0 is loading, we are always in a pending state.
-        if (auth.isLoading) {
-            setStatus('pending');
+        // If we're in the mock dev environment, set success state immediately.
+        if (isMock) {
+            setStatus('success');
             return;
         }
 
-        // If Auth0 is done, and the user is authenticated...
-        if (auth.isAuthenticated) {
-            // ...but we have NOT fetched their data yet (credits is null)...
-            // This `credits === null` check is the key to the fix. It prevents
-            // this block from running during the transitional state where isAuthenticated
-            // flips from false to true, and prevents infinite loops.
-            if (credits === null) {
-                const performInitialFetch = async () => {
-                    setStatus('loading');
-                    try {
-                        const token = await auth.getAccessTokenSilently();
-                        const data = await getCredits(token);
-                        setCredits(data.credits);
-                        setIsAdmin(data.isAdmin);
-                        setStatus('success');
-                    } catch (error) {
-                        console.error("Initial user data fetch failed:", error);
-                        setCredits(0);
-                        setIsAdmin(false);
-                        setStatus('error');
-                    }
-                };
-                performInitialFetch();
-            }
-        } else {
-            // If Auth0 is done and the user is NOT authenticated, this is a final state.
-            // We can safely set their data to the logged-out defaults.
-            setCredits(null);
-            setIsAdmin(false);
-            setStatus('success');
+        // Only proceed when the Auth0 provider is no longer in its initial loading phase.
+        if (!auth.isLoading) {
+            const verifySessionAndFetchData = async () => {
+                // We are now verifying the session, so we enter our own loading state.
+                setStatus('loading');
+                try {
+                    // This is the critical step. We actively try to get a token.
+                    // If the user is not logged in, this will throw an error and jump to the catch block.
+                    // This avoids relying on the potentially racy `isAuthenticated` flag from Auth0.
+                    const token = await auth.getAccessTokenSilently();
+
+                    // If we get a token, the user is authenticated. Now fetch their specific data.
+                    const data = await getCredits(token);
+                    setCredits(data.credits);
+                    setIsAdmin(data.isAdmin);
+                    setStatus('success'); // All data is loaded.
+                } catch (error) {
+                    // This catch block handles both "login required" errors from getAccessTokenSilently
+                    // and any potential network errors from our getCredits call.
+                    // In either case, we treat the user as logged out.
+                    console.log("Session verification or data fetch failed (user likely not logged in):", error);
+                    setCredits(null);
+                    setIsAdmin(false);
+                    // We have successfully determined the user is not logged in, so we move to the 'success'
+                    // state for a logged-out user. The UI can now render the login button.
+                    setStatus('success');
+                }
+            };
+            verifySessionAndFetchData();
         }
-    }, [auth.isLoading, auth.isAuthenticated, auth.getAccessTokenSilently, credits]);
+        // This effect should run ONLY when Auth0's loading status changes.
+    }, [auth.isLoading, auth.getAccessTokenSilently, isMock]);
+
 
     // This function is for MANUAL refreshes (e.g., after an action).
-    // It is separate from the initial load logic in the useEffect.
     const fetchUserData = useCallback(async () => {
         if (isMock || !auth.isAuthenticated) {
             return;
@@ -106,6 +106,7 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const value: UserContextType = {
         user: auth.user,
         isAuthenticated: auth.isAuthenticated,
+        // The isLoading flag is now a reliable, single source of truth for the entire app.
         isLoading: status === 'pending' || status === 'loading',
         status,
         credits,
