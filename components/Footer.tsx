@@ -49,7 +49,7 @@ const Footer = () => {
                         </>
                     )}
                     <p>
-                        Original by{' '}
+                        1Original by{' '}
                         <a
                             href="https://x.com/ammaar"
                             target="_blank"
@@ -61,7 +61,7 @@ const Footer = () => {
                     </p>
                     <span className="text-sky-400" aria-hidden="true">|</span>
                     <p>
-                        Made more funner by{' '}
+                        1Made more funner by{' '}
                         <a
                             href="https://ajbatac.github.io"
                             target="_blank"
