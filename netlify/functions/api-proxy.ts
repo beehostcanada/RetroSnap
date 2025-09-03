@@ -160,30 +160,30 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             return { statusCode: 404, body: JSON.stringify({ error: "Admin route not found." }) };
         } catch (kvError) {
             console.error("Error with KV Store for admin action:", kvError);
+            const errorMessage = kvError instanceof Error ? kvError.message : "An unknown KV store error occurred.";
             
-            // Only fall back to mock data if the context is explicitly 'dev'.
-            const isStrictlyLocalDev = CONTEXT === 'dev';
-
-            if (isStrictlyLocalDev) {
-                console.warn("KV Store unavailable in local dev environment. Returning mock data for admin panel.");
-
-                if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
-                    const mockUsers = [
-                        { email: 'user1@example.com', credits: 5 },
-                        { email: 'user2@example.com', credits: 1 },
-                        { email: 'admin@example.com', credits: 999 },
-                    ];
-                    return { statusCode: 200, body: JSON.stringify(mockUsers) };
-                }
-                if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
-                     return { statusCode: 200, body: JSON.stringify({ credits: 10 }) }; // Return a dummy success response
-                }
+            // On deployed environments, a KV store failure is a critical error.
+            // This prevents the UI from silently showing mock data if the KV store is misconfigured.
+            if (CONTEXT !== 'dev') {
+                return { statusCode: 500, body: JSON.stringify({ error: `Database error: ${errorMessage}` }) };
             }
             
-            // For all deployed environments (or if CONTEXT is missing), return a specific server error.
-            // This makes KV store configuration issues visible on the live site.
-            const errorMessage = kvError instanceof Error ? kvError.message : "An unknown KV store error occurred.";
-            return { statusCode: 500, body: JSON.stringify({ error: `Database error: ${errorMessage}` }) };
+            // ONLY in a local dev context, fall back to mock data for a better developer experience.
+            console.warn("KV Store unavailable in local dev environment. Returning mock data for admin panel.");
+            if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
+                const mockUsers = [
+                    { email: 'user1@example.com', credits: 5 },
+                    { email: 'user2@example.com', credits: 1 },
+                    { email: 'admin@example.com', credits: 999 },
+                ];
+                return { statusCode: 200, body: JSON.stringify(mockUsers) };
+            }
+            if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
+                 return { statusCode: 200, body: JSON.stringify({ credits: 10 }) }; // Return a dummy success response
+            }
+
+            // Fallback for an unhandled dev-mode admin route
+            return { statusCode: 500, body: JSON.stringify({ error: `Database error in dev mode: ${errorMessage}` }) };
         }
     }
 
@@ -219,24 +219,24 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             return { statusCode: 405, body: JSON.stringify({ error: `Method ${event.httpMethod} Not Allowed on /credits` }) };
         } catch (kvError) {
              console.error("Error with KV Store for credits:", kvError);
-             
-             // Only fall back to mock credits if the context is explicitly 'dev'.
-             const isStrictlyLocalDev = CONTEXT === 'dev';
+             const errorMessage = kvError instanceof Error ? kvError.message : "An unknown credit system error occurred.";
 
-             if (isStrictlyLocalDev) {
-                console.warn("Assuming local dev mode and granting mock credits due to KV store error.");
-                if (event.httpMethod === 'GET') {
-                    return { statusCode: 200, body: JSON.stringify({ credits: 3 }) };
-                }
-                if (event.httpMethod === 'POST') {
-                    // Pretend the credit was deducted successfully from a starting balance of 3.
-                    return { statusCode: 200, body: JSON.stringify({ credits: 2 }) };
-                }
+             // On deployed environments, a credit system failure is a critical error.
+             if (CONTEXT !== 'dev') {
+                return { statusCode: 500, body: JSON.stringify({ error: `Credit system error: ${errorMessage}` }) };
+             }
+             
+             // ONLY in a local dev context, fall back to mock credits.
+             console.warn("Assuming local dev mode and granting mock credits due to KV store error.");
+             if (event.httpMethod === 'GET') {
+                 return { statusCode: 200, body: JSON.stringify({ credits: 3 }) };
+             }
+             if (event.httpMethod === 'POST') {
+                 // Pretend the credit was deducted successfully from a starting balance of 3.
+                 return { statusCode: 200, body: JSON.stringify({ credits: 2 }) };
              }
 
-             // For all deployed environments, return a clear error if the credit system fails.
-             const errorMessage = kvError instanceof Error ? kvError.message : "An unknown credit system error occurred.";
-             return { statusCode: 500, body: JSON.stringify({ error: `Credit system error: ${errorMessage}` }) };
+             return { statusCode: 500, body: JSON.stringify({ error: `Credit system error in dev mode: ${errorMessage}` }) };
         }
     }
 
