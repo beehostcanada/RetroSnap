@@ -2,16 +2,17 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, { useState, ChangeEvent, useEffect, useCallback } from 'react';
+import React, { useState, ChangeEvent, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateStyledImage, getCredits } from './services/geminiService';
+import { generateStyledImage } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import { createAlbumPage } from './lib/albumUtils';
 import Footer from './components/Footer';
 import heic2any from 'heic2any';
 import Slideshow from './components/Slideshow';
 import { addWatermark } from './lib/utils';
-import { useAuth0 } from '@auth0/auth0-react';
+import { useUserContext } from './contexts/AuthContext';
+
 
 const DECADES = ['1900s', '1910s', '1920s', '1930s', '1940s', '1950s', '1960s', '1970s', '1980s', '1990s', '2000s', '2010s'];
 const INSPIRATION_PROMPTS = ["A vibrant cartoon", "A charcoal sketch", "8-bit pixel art", "Vaporwave aesthetic", "An oil painting", "A futuristic robot"];
@@ -37,10 +38,6 @@ interface GeneratedImage {
     status: ImageStatus;
     url?: string;
     error?: string;
-}
-
-interface AppProps {
-    useAuthHook?: () => any;
 }
 
 const primaryButtonClasses = "font-permanent-marker text-xl text-center text-stone-900 bg-teal-400 py-3 px-8 rounded-sm transform transition-all duration-200 hover:scale-105 hover:-rotate-2 shadow-[3px_3px_0px_#fb923c] hover:shadow-[4px_4px_0px_#f97316] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:rotate-0 disabled:shadow-[3px_3px_0px_#fb923c]";
@@ -83,8 +80,8 @@ const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number):
     });
 };
 
-function App({ useAuthHook = useAuth0 }: AppProps) {
-    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently } = useAuthHook();
+function App() {
+    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently, credits, fetchUserData } = useUserContext();
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -93,7 +90,6 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
     const [slideshowOpen, setSlideshowOpen] = useState(false);
     const [slideshowStartIndex, setSlideshowStartIndex] = useState(0);    
     const [customPrompt, setCustomPrompt] = useState('');
-    const [credits, setCredits] = useState<number | null>(null);
     const [paidForCurrentImage, setPaidForCurrentImage] = useState<boolean>(false);
 
     const getAuthToken = useCallback(async (): Promise<string> => {
@@ -106,23 +102,6 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
             throw new Error("Authentication error: Could not get a token for the API. Please try logging in again.");
         }
     }, [getAccessTokenSilently]);
-
-    const fetchCredits = useCallback(async () => {
-        if (!isAuthenticated) return;
-        try {
-            const token = await getAuthToken();
-            const creditsData = await getCredits(token);
-            setCredits(creditsData.credits);
-        } catch (error) {
-            console.error("Failed to fetch credits:", error);
-            // Don't show an alert, but credits will remain null, showing a loading state.
-        }
-    }, [isAuthenticated, getAuthToken]);
-
-    useEffect(() => {
-        fetchCredits();
-    }, [fetchCredits]);
-
 
     const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;
@@ -178,7 +157,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
     
     const handleCreditDeduction = () => {
         if (!paidForCurrentImage) {
-            setCredits(prev => (prev !== null ? prev - 1 : 0));
+            fetchUserData(); // Refresh credits from the source of truth
             setPaidForCurrentImage(true);
         }
     }
@@ -303,7 +282,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
         setAppState('idle');
         setCustomPrompt('');
         setPaidForCurrentImage(false);
-        fetchCredits(); // Refresh credits when starting over
+        fetchUserData(); // Refresh credits when starting over
     };
 
     const handleDownloadIndividualImage = (prompt: string) => {
@@ -586,7 +565,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
                 )}
             </AnimatePresence>
             
-            <Footer useAuthHook={useAuthHook} />
+            <Footer />
         </main>
     );
 }

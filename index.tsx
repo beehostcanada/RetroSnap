@@ -8,6 +8,7 @@ import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
 import AdminPage from './pages/AdminPage';
+import { UserProvider } from './contexts/AuthContext';
 
 // --- Simple Error Boundary for Catching Critical Errors ---
 interface ErrorBoundaryProps {
@@ -72,32 +73,43 @@ const AUTH0_AUDIENCE = `https://api.retrosnap.com`;
 
 
 /**
- * A mock auth hook for local development to bypass Auth0 login.
+ * A mock auth provider for local development to bypass Auth0 login.
  */
-const useDevAuth = () => ({
-    user: {
-        name: 'Dev User',
-        email: 'dev@example.com',
-        picture: `https://ui-avatars.com/api/?name=Dev+User&background=random`,
-    },
-    isAuthenticated: true,
-    isLoading: false,
-    loginWithRedirect: () => {
-        console.log('Mock login: already logged in.');
-        return Promise.resolve();
-    },
-    logout: (options?: { logoutParams?: { returnTo?: string } }) => {
-        console.log('Mock logout called. In a real app, you would be redirected to:', options?.logoutParams?.returnTo);
-    },
-    getAccessTokenSilently: async () => 'dev-token',
-});
+const DevProvider = ({ children }: { children: ReactNode }) => {
+    const devAuthValue = {
+        user: {
+            name: 'Dev User',
+            email: 'dev@example.com',
+            picture: `https://ui-avatars.com/api/?name=Dev+User&background=random`,
+        },
+        isAuthenticated: true,
+        isLoading: false,
+        loginWithRedirect: () => {
+            console.log('Mock login: already logged in.');
+            return Promise.resolve();
+        },
+        logout: (options?: { logoutParams?: { returnTo?: string } }) => {
+            console.log('Mock logout called. In a real app, you would be redirected to:', options?.logoutParams?.returnTo);
+        },
+        getAccessTokenSilently: async () => 'dev-token',
+        credits: 99,
+        isAdmin: true,
+        fetchUserData: () => console.log('Mock fetchUserData called.'),
+    };
 
-const AppWrapper = ({ useAuthHook }: { useAuthHook: () => any }) => {
+    return (
+        <UserProvider useAuthHook={() => devAuthValue}>
+            {children}
+        </UserProvider>
+    );
+};
+
+const AppWrapper = () => {
     return (
         <BrowserRouter>
             <Routes>
-                <Route path="/" element={<App useAuthHook={useAuthHook} />} />
-                <Route path="/admin" element={<AdminPage useAuthHook={useAuthHook} />} />
+                <Route path="/" element={<App />} />
+                <Route path="/admin" element={<AdminPage />} />
             </Routes>
         </BrowserRouter>
     );
@@ -108,7 +120,11 @@ const Main = () => {
     const isDev = window.location.hostname === 'localhost' || window.location.hostname.endsWith('.sercontent.goog');
 
     if (isDev) {
-        return <AppWrapper useAuthHook={useDevAuth} />;
+        return (
+            <DevProvider>
+                <AppWrapper />
+            </DevProvider>
+        );
     }
     
     return (
@@ -119,9 +135,11 @@ const Main = () => {
                 redirect_uri: window.location.origin,
                 audience: AUTH0_AUDIENCE,
             }}
+            cacheLocation="localstorage"
         >
-            {/* Fix: `useAuthHook` is not defined in this scope. Passed the imported `useAuth0` hook instead. */}
-            <AppWrapper useAuthHook={useAuth0} />
+            <UserProvider>
+                <AppWrapper />
+            </UserProvider>
         </Auth0Provider>
     );
 };

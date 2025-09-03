@@ -3,20 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import React from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
 import { Link } from 'react-router-dom';
+import { useUserContext } from '../contexts/AuthContext';
 
-interface FooterProps {
-    useAuthHook?: () => any;
-}
-// This value would ideally be loaded from the same environment config as the backend
-// but for simplicity in this project, we hardcode it on the client.
-const ADMIN_EMAIL = 'dev@example.com'; 
 
-const Footer = ({ useAuthHook = useAuth0 }: FooterProps) => {
-    const { user, isAuthenticated, logout } = useAuthHook();
-    const isAdmin = isAuthenticated && user?.email === ADMIN_EMAIL;
-
+const Footer = () => {
+    const { user, isAuthenticated, isAdmin, logout } = useUserContext();
+    
     return (
         <footer className="fixed bottom-0 left-0 right-0 bg-sky-600 p-3 z-50 text-sky-100 text-xs sm:text-sm border-t border-sky-300">
             <div className="max-w-screen-xl mx-auto flex justify-between items-center gap-4 px-4">

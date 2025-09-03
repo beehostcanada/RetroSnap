@@ -3,12 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import React, { useState, useEffect, useCallback } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useNavigate } from 'react-router-dom';
 import { getAllUsers, updateUserCredits } from '../services/geminiService';
 import Footer from '../components/Footer';
-
-const ADMIN_EMAIL = 'dev@example.com'; // Should match the one in Footer.tsx and Netlify env vars
+import { useUserContext } from '../contexts/AuthContext';
 
 interface User {
     id: string;
@@ -16,12 +14,8 @@ interface User {
     credits: number;
 }
 
-interface AppProps {
-    useAuthHook?: () => any;
-}
-
-const AdminPage = ({ useAuthHook = useAuth0 }: AppProps) => {
-    const { user, isAuthenticated, isLoading, getAccessTokenSilently } = useAuthHook();
+const AdminPage = () => {
+    const { isAuthenticated, isLoading, isAdmin, getAccessTokenSilently } = useUserContext();
     const navigate = useNavigate();
     const [users, setUsers] = useState<User[]>([]);
     const [loadingMessage, setLoadingMessage] = useState('Checking permissions...');
@@ -52,17 +46,17 @@ const AdminPage = ({ useAuthHook = useAuth0 }: AppProps) => {
 
     useEffect(() => {
         if (isLoading) {
-            return; // Wait for auth state to be resolved
+            return; // Wait for auth state to be resolved from context
         }
         if (!isAuthenticated) {
             navigate('/'); // Redirect if not logged in
-        } else if (user?.email !== ADMIN_EMAIL) {
+        } else if (!isAdmin) {
             setError('Access Denied. You are not authorized to view this page.');
             setLoadingMessage('');
         } else {
             fetchUsers();
         }
-    }, [isLoading, isAuthenticated, user, navigate, fetchUsers]);
+    }, [isLoading, isAuthenticated, isAdmin, navigate, fetchUsers]);
 
     const handleCreditChange = (email: string, value: string) => {
         setEditCredits(prev => ({ ...prev, [email]: value }));
@@ -147,7 +141,7 @@ const AdminPage = ({ useAuthHook = useAuth0 }: AppProps) => {
                 <p className="font-permanent-marker text-stone-600 mt-2 text-xl tracking-wide">Admin Panel</p>
             </div>
             {renderContent()}
-            <Footer useAuthHook={useAuthHook} />
+            <Footer />
         </main>
     );
 };

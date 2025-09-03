@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
-import { Firestore } from '@google-cloud/firestore';
+// FIX: Import `FieldValue` to use for atomic server-side operations.
+import { Firestore, FieldValue } from '@google-cloud/firestore';
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 const INITIAL_CREDITS = 3;
@@ -100,12 +101,14 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     
     // --- API ROUTER ---
     const requestPath = event.path.replace('/api-proxy', '');
+    const isAdmin = userEmail === ADMIN_EMAIL;
+
 
     // --- USER ROUTES ---
     if (requestPath === '/credits' && event.httpMethod === 'GET') {
         try {
             const user = await getDbUser(userEmail);
-            return jsonResponse(200, { credits: user?.credits ?? 0 });
+            return jsonResponse(200, { credits: user?.credits ?? 0, isAdmin });
         } catch (error) {
             console.error("Error getting user credits:", error);
             return jsonResponse(500, { error: "Failed to retrieve user credits." });
@@ -113,7 +116,6 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     }
 
     // --- ADMIN ROUTES ---
-    const isAdmin = userEmail === ADMIN_EMAIL;
     if (requestPath.startsWith('/admin')) {
         if (!isAdmin) {
             return jsonResponse(403, { error: "Forbidden: Admin access required." });
@@ -172,7 +174,8 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             // Deduct credit on success
             if (!firestore) throw new Error("Firestore not initialized.");
             await firestore.collection('users').doc(userEmail).update({
-                credits: Firestore.FieldValue.increment(-1)
+                // FIX: Use `FieldValue.increment` for atomic updates. `FieldValue` is not a static property of `Firestore`.
+                credits: FieldValue.increment(-1)
             });
 
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: responseBody };

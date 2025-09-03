@@ -68,11 +68,11 @@ async function apiFetch(endpoint: string, token: string, options: RequestInit = 
 }
 
 /**
- * Fetches the current user's credit balance from the backend.
+ * Fetches the current user's credit balance and admin status from the backend.
  * @param token The user's JWT.
- * @returns A promise that resolves to an object containing the user's credits.
+ * @returns A promise that resolves to an object containing the user's credits and admin status.
  */
-export async function getCredits(token: string): Promise<{ credits: number }> {
+export async function getCredits(token: string): Promise<{ credits: number; isAdmin: boolean }> {
     return apiFetch('/credits', token);
 }
 

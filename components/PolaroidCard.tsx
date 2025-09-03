@@ -72,7 +72,7 @@ const PolaroidCard: React.FC<PolaroidCardProps> = ({ imageUrl, caption, status, 
         <div
             onClick={isClickable ? onCardClick : undefined}
             className={cn(
-                "bg-yellow-50 p-4 pb-20 flex flex-col items-center justify-start aspect-[3/4] w-80 max-w-full rounded-md shadow-xl relative transition-all duration-300 ease-in-out hover:shadow-2xl hover:-translate-y-2 hover:-rotate-1",
+                "bg-gradient-to-br from-rose-100 via-orange-100 to-cyan-100 p-4 pb-20 flex flex-col items-center justify-start aspect-[3/4] w-80 max-w-full rounded-md shadow-xl relative transition-all duration-300 ease-in-out hover:shadow-2xl hover:-translate-y-2 hover:-rotate-1",
                 isClickable && "cursor-pointer"
             )}
         >
