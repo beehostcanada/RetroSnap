@@ -35,6 +35,15 @@ const jsonResponse = (statusCode: number, body: object) => ({
     body: JSON.stringify(body),
 });
 
+// A simple email masking function for safe logging.
+const maskEmail = (email?: string): string => {
+    if (!email || !email.includes('@')) return 'invalid-or-missing-email';
+    const [localPart, domain] = email.split('@');
+    if (localPart.length <= 3) return `***@${domain}`;
+    return `${localPart.substring(0, 2)}...${localPart.slice(-1)}@${domain}`;
+};
+
+
 const getDbUser = async (email: string) => {
     if (!firestore) throw new Error("Firestore not initialized.");
     const userRef = firestore.collection('users').doc(email);
@@ -101,7 +110,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     
     // --- API ROUTER ---
     const requestPath = event.path.replace('/api-proxy', '');
-    const isAdmin = userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    
+    // Trim whitespace and compare emails case-insensitively for robustness.
+    const isAdmin = ADMIN_EMAIL && userEmail.trim().toLowerCase() === ADMIN_EMAIL.trim().toLowerCase();
+
+    // Log the authorization check details for easier debugging in production.
+    console.log(`[AUTH_CHECK] Path: ${requestPath} | Admin Email (env): ${maskEmail(ADMIN_EMAIL)} | User Email (auth): ${maskEmail(userEmail)} | IsAdmin: ${isAdmin}`);
 
 
     // --- USER ROUTES ---
