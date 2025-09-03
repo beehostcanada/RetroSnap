@@ -35,6 +35,11 @@ const jsonResponse = (statusCode: number, body: object) => ({
     body: JSON.stringify(body),
 });
 
+const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
+    return String(error);
+};
+
 // A simple email masking function for safe logging.
 const maskEmail = (email?: string): string => {
     if (!email || !email.includes('@')) return 'invalid-or-missing-email';
@@ -69,7 +74,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         initializeFirestore();
     } catch (error) {
         console.error("Firestore Initialization Error:", error);
-        return jsonResponse(500, { error: "Could not connect to the database." });
+        return jsonResponse(500, { error: "Could not connect to the database.", details: getErrorMessage(error) });
     }
     // --- END VALIDATE ENVIRONMENT ---
 
@@ -99,7 +104,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             userEmail = userInfo.email;
         } catch (error) {
             console.error("Error validating token with Auth0:", error);
-            return jsonResponse(500, { error: "An internal error occurred during authentication." });
+            return jsonResponse(500, { error: "An internal error occurred during authentication.", details: getErrorMessage(error) });
         }
     }
 
@@ -125,7 +130,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             return jsonResponse(200, { credits: user?.credits ?? 0, isAdmin });
         } catch (error) {
             console.error("Error getting user credits:", error);
-            return jsonResponse(500, { error: "Failed to retrieve user credits." });
+            return jsonResponse(500, { error: "Failed to retrieve user credits.", details: getErrorMessage(error) });
         }
     }
 
@@ -143,7 +148,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
                 return jsonResponse(200, users);
             } catch (error) {
                 console.error("Error fetching all users:", error);
-                return jsonResponse(500, { error: "Failed to fetch users." });
+                return jsonResponse(500, { error: "Failed to fetch users.", details: getErrorMessage(error) });
             }
         }
         if (requestPath === '/admin/credits' && event.httpMethod === 'POST') {
@@ -157,7 +162,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
                 return jsonResponse(200, { success: true, message: `Credits for ${email} updated to ${credits}.` });
             } catch (error) {
                 console.error("Error updating user credits:", error);
-                return jsonResponse(500, { error: "Failed to update credits." });
+                return jsonResponse(500, { error: "Failed to update credits.", details: getErrorMessage(error) });
             }
         }
     }
@@ -196,7 +201,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 
         } catch (error) {
             console.error("Error in Gemini proxy:", error);
-            return jsonResponse(500, { error: "An internal error occurred while contacting the AI model." });
+            return jsonResponse(500, { error: "An internal error occurred while contacting the AI model.", details: getErrorMessage(error) });
         }
     }
 

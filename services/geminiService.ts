@@ -45,18 +45,22 @@ async function apiFetch(endpoint: string, token: string, options: RequestInit = 
 
     const responseBodyText = await response.text();
     if (!response.ok) {
-        let errorDetails = `Status code: ${response.status}`;
+        let errorMessage = `API Error (Status: ${response.status})`;
         try {
             const errorJson = JSON.parse(responseBodyText);
-            errorDetails = (errorJson.error || errorJson.message || JSON.stringify(errorJson));
+            // Construct a more detailed error message
+            const mainError = errorJson.error || errorJson.message || "An unknown error occurred on the server.";
+            const techDetails = errorJson.details ? `\nTechnical Details: ${errorJson.details}` : '';
+            errorMessage = `${mainError}${techDetails}`;
         } catch (e) {
-            errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
+            // If parsing fails, just use the raw text
+            errorMessage = `Status ${response.status}: ${responseBodyText}`;
         }
         
         if (response.status === 401) throw new Error("Authentication failed. Please log out and log back in.");
         if (response.status === 403) throw new Error("Forbidden: You do not have permission to perform this action.");
         
-        throw new Error(`API request failed: ${errorDetails}`);
+        throw new Error(`API request failed: ${errorMessage}`);
     }
 
     // Return nothing if response is empty
