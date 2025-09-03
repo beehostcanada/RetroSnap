@@ -120,7 +120,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         try {
             const creditsStore = (context as any).netlify?.kvStore?.("credits");
             if (!creditsStore) {
-                throw new Error("KV Store not available in this environment.");
+                throw new Error("KV Store not available in this environment. Please ensure it is enabled and linked in your Netlify site configuration.");
             }
             
             // GET /admin/users - List all users and their credits
@@ -161,11 +161,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
         } catch (kvError) {
             console.error("Error with KV Store for admin action:", kvError);
             
-            const isStoreUnavailable = kvError instanceof Error && kvError.message.includes("KV Store not available");
-
-            // Only fall back to mock data if the store is explicitly unavailable (local dev without Netlify CLI).
-            if (isStoreUnavailable) {
-                console.warn("KV Store unavailable. Assuming local dev mode and returning mock data for admin panel.");
+            // Only fall back to mock data in a local development environment.
+            // CONTEXT is 'dev' when using Netlify CLI.
+            const isLocalDev = CONTEXT === 'dev' || !CONTEXT;
+            
+            if (isLocalDev) {
+                console.warn("KV Store unavailable in local dev environment. Returning mock data for admin panel.");
 
                 if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
                     const mockUsers = [
@@ -175,22 +176,12 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
                     ];
                     return { statusCode: 200, body: JSON.stringify(mockUsers) };
                 }
-
                 if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
-                    if (!event.body) {
-                        return { statusCode: 400, body: JSON.stringify({ error: "Request body is missing." }) };
-                    }
-                    try {
-                        const { email } = JSON.parse(event.body);
-                        console.log(`Mock-adding credits to ${email}.`);
-                        return { statusCode: 200, body: JSON.stringify({ credits: 10 }) };
-                    } catch (parseError) {
-                        return { statusCode: 400, body: JSON.stringify({ error: "Invalid JSON in request body." }) };
-                    }
+                     return { statusCode: 200, body: JSON.stringify({ credits: 10 }) }; // Return a dummy success response
                 }
             }
             
-            // For all other errors (likely on the live site), return a specific server error.
+            // For ALL errors on a deployed environment (production, previews, etc.), return a specific server error.
             const errorMessage = kvError instanceof Error ? kvError.message : "An unknown KV store error occurred.";
             return { statusCode: 500, body: JSON.stringify({ error: `Database error: ${errorMessage}` }) };
         }
@@ -208,18 +199,11 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             }
 
             if (event.httpMethod === 'GET') {
-                if (isDevRequest) {
-                    return { statusCode: 200, body: JSON.stringify({ credits: 999 }) };
-                }
                 const credits = await getOrCreateUserCredits(creditsStore, userIdentifier);
                 return { statusCode: 200, body: JSON.stringify({ credits }) };
             }
 
             if (event.httpMethod === 'POST') {
-                if (isDevRequest) {
-                    return { statusCode: 200, body: JSON.stringify({ credits: 999 }) }; // Dev user has "infinite" credits
-                }
-                
                 const currentCredits = await getOrCreateUserCredits(creditsStore, userIdentifier);
 
                 if (currentCredits <= 0) {
@@ -235,23 +219,49 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
             return { statusCode: 405, body: JSON.stringify({ error: `Method ${event.httpMethod} Not Allowed on /credits` }) };
         } catch (kvError) {
              console.error("Error with KV Store for credits:", kvError);
-             // Graceful fallback: If KV store fails, assume it's a local dev environment
-             // without Netlify CLI. Grant mock credits to avoid blocking development.
-             console.warn("Assuming local dev mode and granting mock credits due to KV store error.");
-             if (event.httpMethod === 'GET') {
-                return { statusCode: 200, body: JSON.stringify({ credits: 3 }) };
+             
+             // Only fall back to mock credits in a local development environment.
+             const isLocalDev = CONTEXT === 'dev' || !CONTEXT;
+
+             if (isLocalDev) {
+                console.warn("Assuming local dev mode and granting mock credits due to KV store error.");
+                if (event.httpMethod === 'GET') {
+                    return { statusCode: 200, body: JSON.stringify({ credits: 3 }) };
+                }
+                if (event.httpMethod === 'POST') {
+                    // Pretend the credit was deducted successfully from a starting balance of 3.
+                    return { statusCode: 200, body: JSON.stringify({ credits: 2 }) };
+                }
              }
-             if (event.httpMethod === 'POST') {
-                // Pretend the credit was deducted successfully from a starting balance of 3.
-                return { statusCode: 200, body: JSON.stringify({ credits: 2 }) };
-             }
-             return { statusCode: 500, body: JSON.stringify({ error: "An error occurred with the credit system." }) };
+
+             const errorMessage = kvError instanceof Error ? kvError.message : "An unknown credit system error occurred.";
+             return { statusCode: 500, body: JSON.stringify({ error: `Credit system error: ${errorMessage}` }) };
         }
     }
 
     // --- DEFAULT: PROXY TO GEMINI API ---
     // All other POST requests are proxied to the Gemini API.
     if (event.httpMethod === 'POST') {
+        // Dev requests get infinite credits and don't need to check balance
+        if (isDevRequest) {
+            // Passthrough to Gemini API
+        } else {
+            // For real users, perform a credit check before calling the expensive Gemini API.
+            try {
+                const creditsStore = (context as any).netlify?.kvStore?.("credits");
+                if (!creditsStore) throw new Error("KV store is unavailable for pre-check.");
+                
+                const currentCredits = await getOrCreateUserCredits(creditsStore, userIdentifier);
+                if (currentCredits <= 0) {
+                    return { statusCode: 402, body: JSON.stringify({ error: "You are out of credits and cannot generate images." }) };
+                }
+            } catch (err) {
+                console.error("Failed to perform credit pre-check:", err);
+                const errorMessage = err instanceof Error ? err.message : "An unknown credit system error occurred.";
+                return { statusCode: 500, body: JSON.stringify({ error: `Credit system pre-check failed: ${errorMessage}` }) };
+            }
+        }
+
         const geminiUrl = `${GEMINI_API_BASE_URL}/${requestPath}?key=${API_KEY}`;
         try {
             const response = await fetch(geminiUrl, {
