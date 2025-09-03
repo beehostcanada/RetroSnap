@@ -101,7 +101,7 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     
     // --- API ROUTER ---
     const requestPath = event.path.replace('/api-proxy', '');
-    const isAdmin = userEmail === ADMIN_EMAIL;
+    const isAdmin = userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
 
     // --- USER ROUTES ---

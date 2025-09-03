@@ -34,46 +34,48 @@ interface UserProviderProps {
 }
 
 export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderProps) => {
-    const { 
-        user, 
-        isAuthenticated, 
-        isLoading,
-        loginWithRedirect,
-        logout,
-        getAccessTokenSilently 
-    } = useAuthHook();
+    const auth = useAuthHook();
+    const isMock = useAuthHook !== useAuth0;
     
-    const [credits, setCredits] = useState<number | null>(null);
-    const [isAdmin, setIsAdmin] = useState<boolean>(false);
+    // If using mock, state comes directly from it. If not, it's fetched from the backend.
+    const [credits, setCredits] = useState<number | null>(isMock ? auth.credits : null);
+    const [isAdmin, setIsAdmin] = useState<boolean>(isMock ? auth.isAdmin : false);
 
     const fetchUserData = useCallback(async () => {
-        if (!isAuthenticated) return;
-        try {
-            const token = await getAccessTokenSilently();
-            const data = await getCredits(token);
-            setCredits(data.credits);
-            setIsAdmin(data.isAdmin);
-        } catch (error) {
-            console.error("Failed to fetch user data:", error);
-            // In case of error, reset to safe defaults
-            setCredits(0);
-            setIsAdmin(false);
+        // Never fetch from the API if using the mock provider.
+        // The user data is static and set during initial state.
+        if (isMock) {
+            return;
         }
-    }, [isAuthenticated, getAccessTokenSilently]);
+
+        if (auth.isAuthenticated) {
+            try {
+                const token = await auth.getAccessTokenSilently();
+                const data = await getCredits(token);
+                setCredits(data.credits);
+                setIsAdmin(data.isAdmin);
+            } catch (error) {
+                console.error("Failed to fetch user data:", error);
+                // In case of error, reset to safe defaults
+                setCredits(0);
+                setIsAdmin(false);
+            }
+        }
+    }, [isMock, auth.isAuthenticated, auth.getAccessTokenSilently]);
 
     useEffect(() => {
         fetchUserData();
     }, [fetchUserData]);
 
-    const value = {
-        user,
-        isAuthenticated,
-        isLoading,
+    const value: UserContextType = {
+        user: auth.user,
+        isAuthenticated: auth.isAuthenticated,
+        isLoading: auth.isLoading,
         credits,
         isAdmin,
-        loginWithRedirect,
-        logout,
-        getAccessTokenSilently,
+        loginWithRedirect: auth.loginWithRedirect,
+        logout: auth.logout,
+        getAccessTokenSilently: auth.getAccessTokenSilently,
         fetchUserData
     };
 
