@@ -46,7 +46,7 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const [status, setStatus] = useState<Status>('pending');
     const [error, setError] = useState<Error | null>(null);
 
-    // This single effect orchestrates the entire session verification and data loading process.
+    // This effect orchestrates the entire session verification and initial data loading process.
     useEffect(() => {
         if (isMock) {
             setStatus('success');
@@ -86,6 +86,56 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
             verifySessionAndFetchData();
         }
     }, [auth.isLoading, auth.isAuthenticated, auth.getAccessTokenSilently, isMock]);
+
+
+    // This effect implements real-time data synchronization using polling.
+    // It keeps the credit count consistent across multiple tabs.
+    useEffect(() => {
+        if (isMock || !auth.isAuthenticated || status !== 'success') {
+            return; // Only run when authenticated and initial load is complete.
+        }
+
+        let intervalId: number | undefined;
+
+        const syncUserData = async () => {
+            // Don't fetch if the tab is not visible to save resources.
+            if (document.hidden) {
+                return;
+            }
+            try {
+                const token = await auth.getAccessTokenSilently();
+                const { isAdmin, credits } = await fetchUserData(token);
+                // React's setState already prevents re-renders if the value is the same.
+                setIsAdmin(isAdmin);
+                setCredits(credits);
+            } catch (err) {
+                console.error("Failed to sync user data in background:", err);
+                // If auth fails (e.g., session revoked), stop polling.
+                if (err instanceof Error && (err.message.includes("Authentication failed") || err.message.includes("Invalid token"))) {
+                    clearInterval(intervalId);
+                }
+            }
+        };
+
+        // Set up the polling interval.
+        intervalId = window.setInterval(syncUserData, 20000); // Poll every 20 seconds.
+
+        // Also, sync immediately when the tab becomes visible again.
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                syncUserData();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // Cleanup function to clear interval and listener on unmount or re-run.
+        return () => {
+            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+
+    }, [isMock, auth.isAuthenticated, status, auth.getAccessTokenSilently]);
 
 
     // Function to decrement credits locally for immediate UI feedback.
