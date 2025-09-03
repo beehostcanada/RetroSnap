@@ -393,8 +393,7 @@ function App() {
                        {user?.name && (
                            <div className="text-center mb-4">
                                <p className="font-permanent-marker text-stone-600 text-2xl" aria-live="polite">
-                                   Welcome, {user.name.split(' ')[0]}
-                                   {user.email && <span className="text-lg"> ({user.email})</span>}!
+                                   Welcome, {user.name.split(' ')[0]}!
                                </p>
                                {credits !== null ? (
                                    <p className="font-permanent-marker text-teal-600 text-lg">
