@@ -24,13 +24,83 @@ interface MinimalGenerateContentResponse {
     candidates?: Candidate[];
 }
 
-export interface AdminUser {
-    email: string;
-    credits: number;
+// --- API Service for Credits and Admin Actions ---
+
+/**
+ * A generic fetch wrapper for making authenticated API calls to our backend.
+ * @param endpoint The API endpoint to call (e.g., '/credits').
+ * @param token The user's JWT for authentication.
+ * @param options Additional fetch options (method, body, etc.).
+ * @returns The JSON response from the API.
+ */
+async function apiFetch(endpoint: string, token: string, options: RequestInit = {}) {
+    const response = await fetch(`/api-proxy${endpoint}`, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            ...options.headers,
+        },
+    });
+
+    const responseBodyText = await response.text();
+    if (!response.ok) {
+        let errorDetails = `Status code: ${response.status}`;
+        try {
+            const errorJson = JSON.parse(responseBodyText);
+            errorDetails = (errorJson.error || errorJson.message || JSON.stringify(errorJson));
+        } catch (e) {
+            errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
+        }
+        
+        if (response.status === 401) throw new Error("Authentication failed. Please log out and log back in.");
+        if (response.status === 403) throw new Error("Forbidden: You do not have permission to perform this action.");
+        
+        throw new Error(`API request failed: ${errorDetails}`);
+    }
+
+    // Return nothing if response is empty
+    if (!responseBodyText) {
+        return null;
+    }
+
+    return JSON.parse(responseBodyText);
+}
+
+/**
+ * Fetches the current user's credit balance from the backend.
+ * @param token The user's JWT.
+ * @returns A promise that resolves to an object containing the user's credits.
+ */
+export async function getCredits(token: string): Promise<{ credits: number }> {
+    return apiFetch('/credits', token);
+}
+
+/**
+ * (Admin only) Fetches all users and their credit balances.
+ * @param token The admin's JWT.
+ * @returns A promise that resolves to an array of user data.
+ */
+export async function getAllUsers(token: string): Promise<Array<{ id: string; email: string; credits: number }>> {
+    return apiFetch('/admin/users', token);
+}
+
+/**
+ * (Admin only) Updates a specific user's credit balance.
+ * @param token The admin's JWT.
+ * @param email The email of the user to update.
+ * @param credits The new credit amount.
+ * @returns A promise that resolves on success.
+ */
+export async function updateUserCredits(token: string, email: string, credits: number): Promise<void> {
+    return apiFetch('/admin/credits', token, {
+        method: 'POST',
+        body: JSON.stringify({ email, credits }),
+    });
 }
 
 
-// --- Helper Functions ---
+// --- Gemini API Service ---
 
 /**
  * Processes the API response, extracting the image or throwing an error if none is found.
@@ -106,6 +176,9 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object, tok
                 if (response.status === 401) {
                     throw new Error("Authentication failed. Please log out and log back in.");
                 }
+                 if (response.status === 402) {
+                    throw new Error("You are out of credits.");
+                }
 
                 throw new Error(`API request failed: ${errorDetails}`);
             }
@@ -161,113 +234,4 @@ export async function generateStyledImage(imageDataUrl: string, prompt: string, 
         const errorMessage = error instanceof Error ? error.message : String(error);
         throw new Error(`The AI model failed to generate an image. Details: ${errorMessage}`);
     }
-}
-
-/**
- * Fetches the current user's credit balance.
- * @param token The user's JWT for authentication.
- * @returns A promise that resolves to an object containing the credit count.
- */
-export async function getUserCredits(token: string): Promise<{ credits: number }> {
-    const response = await fetch('/api-proxy/credits', {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-        },
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Failed to get credits: ${errorBody}`);
-    }
-
-    return response.json();
-}
-
-
-/**
- * Deducts one credit from the user's account.
- * @param token The user's JWT for authentication.
- * @returns A promise that resolves to an object with the new credit count.
- */
-export async function deductUserCredit(token: string): Promise<{ credits: number }> {
-    const response = await fetch('/api-proxy/credits', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-        },
-    });
-
-    const responseBodyText = await response.text();
-    if (!response.ok) {
-        let errorDetails = `Status code: ${response.status}`;
-        try {
-            const errorJson = JSON.parse(responseBodyText);
-            errorDetails = (errorJson.error || errorJson.message || JSON.stringify(errorJson));
-        } catch (e) {
-            errorDetails = `${errorDetails}, Body: ${responseBodyText}`;
-        }
-        
-        if (response.status === 402) {
-            throw new Error("You are out of credits.");
-        }
-        
-        throw new Error(`Failed to deduct credit: ${errorDetails}`);
-    }
-
-    return JSON.parse(responseBodyText);
-}
-
-/**
- * Fetches all users and their credit balances. (Admin only)
- * @param token The admin user's JWT.
- * @returns A promise that resolves to an array of user objects.
- */
-export async function getAdminUsers(token: string): Promise<AdminUser[]> {
-    const response = await fetch('/api-proxy/admin/users', {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-        },
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-        try {
-            throw new Error(JSON.parse(errorBody).error || errorBody);
-        } catch {
-             throw new Error(`Failed to get users: ${errorBody}`);
-        }
-    }
-
-    return response.json();
-}
-
-/**
- * Adds credits to a specific user's account. (Admin only)
- * @param token The admin user's JWT.
- * @param email The email of the user to receive credits.
- * @param amount The number of credits to add.
- * @returns A promise that resolves to an object with the user's new credit count.
- */
-export async function addCreditsToUser(token: string, email: string, amount: number): Promise<{ credits: number }> {
-     const response = await fetch('/api-proxy/admin/users/add-credits', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, amount }),
-    });
-
-    if (!response.ok) {
-        const errorBody = await response.text();
-         try {
-            throw new Error(JSON.parse(errorBody).error || errorBody);
-        } catch {
-            throw new Error(`Failed to add credits: ${errorBody}`);
-        }
-    }
-
-    return response.json();
 }

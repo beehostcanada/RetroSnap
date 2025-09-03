@@ -3,304 +3,187 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
+import { Firestore } from '@google-cloud/firestore';
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
+const INITIAL_CREDITS = 3;
 
-// IMPORTANT: Replace with your admin user's email address(es).
-// Only these users will be able to access the admin endpoints.
-const ADMIN_USERS = ['ajbatac@gmail.com'];
-
-/**
- * Retrieves a user's credits from the KV store. If the user doesn't exist or
- * the data is invalid, it initializes them with 3 credits.
- * @param store The Netlify KV store instance.
- * @param userId The unique identifier for the user.
- * @returns A promise that resolves to the user's credit balance.
- */
-async function getOrCreateUserCredits(store: any, userId: string): Promise<number> {
-    const storedValue = await store.get(userId);
-
-    // Case 1: New user. The store returns null for a non-existent key.
-    if (storedValue === null) {
-        await store.set(userId, 3);
-        return 3;
+// --- Firestore Client Initialization ---
+let firestore: Firestore | null = null;
+const initializeFirestore = () => {
+    if (firestore) {
+        return;
     }
-
-    // Case 2: Existing user or potentially corrupted data.
-    // We use parseInt which handles numbers and numeric strings, but returns NaN for other types.
-    const credits = parseInt(storedValue as any, 10);
-
-    // If parsing results in NaN (e.g., from "abc", an empty object, etc.), the data
-    // is considered invalid. In this case, we reset the user's credits.
-    if (isNaN(credits)) {
-        await store.set(userId, 3);
-        return 3;
+    const { GCP_PROJECT_ID, GCP_PRIVATE_KEY, GCP_CLIENT_EMAIL } = process.env;
+    if (!GCP_PROJECT_ID || !GCP_PRIVATE_KEY || !GCP_CLIENT_EMAIL) {
+        throw new Error("Missing required GCP environment variables for Firestore connection.");
     }
-    
-    // The value is a valid number.
-    return credits;
-}
+    firestore = new Firestore({
+        projectId: GCP_PROJECT_ID,
+        credentials: {
+            private_key: GCP_PRIVATE_KEY.replace(/\\n/g, '\n'), // Important for Netlify env vars
+            client_email: GCP_CLIENT_EMAIL,
+        },
+    });
+};
 
+// --- Helper Functions ---
+const jsonResponse = (statusCode: number, body: object) => ({
+    statusCode,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+});
+
+const getDbUser = async (email: string) => {
+    if (!firestore) throw new Error("Firestore not initialized.");
+    const userRef = firestore.collection('users').doc(email);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+        // Create user with initial credits
+        const newUser = { email, credits: INITIAL_CREDITS };
+        await userRef.set(newUser);
+        return newUser;
+    }
+    return userDoc.data();
+};
 
 const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
-    const { AUTH0_DOMAIN, API_KEY, CONTEXT } = process.env;
+    const { AUTH0_DOMAIN, API_KEY, CONTEXT, ADMIN_EMAIL } = process.env;
 
     // --- VALIDATE ENVIRONMENT ---
-    if (!AUTH0_DOMAIN) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ error: "AUTH0_DOMAIN is not configured on the server." }),
-        };
+    if (!AUTH0_DOMAIN || !API_KEY || !ADMIN_EMAIL) {
+        return jsonResponse(500, { error: "Server is not configured correctly. Missing required environment variables." });
     }
-    if (!API_KEY) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ error: "API_KEY is not configured on the server." }),
-        };
+    try {
+        initializeFirestore();
+    } catch (error) {
+        console.error("Firestore Initialization Error:", error);
+        return jsonResponse(500, { error: "Could not connect to the database." });
     }
     // --- END VALIDATE ENVIRONMENT ---
 
 
     // --- AUTHENTICATION & USER IDENTIFICATION ---
+    let userEmail: string | null = null;
     const authHeader = event.headers['authorization'];
-    const isDevRequest = authHeader === 'Bearer dev-token';
-    let userIdentifier: string | null = null;
+    const isDevRequest = authHeader === 'Bearer dev-token' && CONTEXT === 'dev';
 
     if (isDevRequest) {
-        if (CONTEXT && CONTEXT !== 'dev') {
-            return {
-                statusCode: 401,
-                body: JSON.stringify({ error: `Unauthorized: Dev token is only allowed in dev environments, but CONTEXT is '${CONTEXT}'.` }),
-            };
-        }
-        userIdentifier = 'admin@example.com'; // Use admin for dev token
+        userEmail = 'dev@example.com';
     } else {
         if (!authHeader) {
-            return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: Missing Authorization header." }) };
+            return jsonResponse(401, { error: "Unauthorized: Missing Authorization header." });
         }
-
         try {
             const userInfoResponse = await fetch(`https://${AUTH0_DOMAIN}/userinfo`, {
                 headers: { Authorization: authHeader },
             });
-
             if (!userInfoResponse.ok) {
-                const errorBody = await userInfoResponse.text();
-                console.error("Auth0 user info validation failed:", errorBody);
-                return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized: Invalid token." }) };
+                return jsonResponse(401, { error: "Unauthorized: Invalid token." });
             }
-            
             const userInfo = await userInfoResponse.json();
-            // Use email as the unique identifier for the credit system
             if (!userInfo || typeof userInfo.email !== 'string') {
-                 return { statusCode: 400, body: JSON.stringify({ error: "User email not found in token." }) };
+                return jsonResponse(400, { error: "User email not found in token." });
             }
-            userIdentifier = userInfo.email;
-
+            userEmail = userInfo.email;
         } catch (error) {
             console.error("Error validating token with Auth0:", error);
-            return { statusCode: 500, body: JSON.stringify({ error: "An internal error occurred during authentication." }) };
+            return jsonResponse(500, { error: "An internal error occurred during authentication." });
         }
+    }
+
+    if (!userEmail) {
+        return jsonResponse(401, { error: "Could not identify user." });
     }
     // --- END AUTHENTICATION ---
+    
+    // --- API ROUTER ---
+    const requestPath = event.path.replace('/api-proxy', '');
 
-    if (!userIdentifier) {
-        return { statusCode: 401, body: JSON.stringify({ error: "Could not identify user." }) };
+    // --- USER ROUTES ---
+    if (requestPath === '/credits' && event.httpMethod === 'GET') {
+        try {
+            const user = await getDbUser(userEmail);
+            return jsonResponse(200, { credits: user?.credits ?? 0 });
+        } catch (error) {
+            console.error("Error getting user credits:", error);
+            return jsonResponse(500, { error: "Failed to retrieve user credits." });
+        }
     }
 
-    const requestPath = event.path.replace('/api-proxy/', '');
-    const isAdmin = userIdentifier && ADMIN_USERS.includes(userIdentifier);
-
-    // --- ADMIN ENDPOINT ROUTING ---
-    if (requestPath.startsWith('admin/')) {
+    // --- ADMIN ROUTES ---
+    const isAdmin = userEmail === ADMIN_EMAIL;
+    if (requestPath.startsWith('/admin')) {
         if (!isAdmin) {
-            return { statusCode: 403, body: JSON.stringify({ error: "Forbidden: Admin access required." }) };
+            return jsonResponse(403, { error: "Forbidden: Admin access required." });
         }
 
-        try {
-            const creditsStore = (context as any).netlify?.kvStore?.("credits");
-            if (!creditsStore) {
-                throw new Error("KV Store not available in this environment. Please ensure it is enabled and linked in your Netlify site configuration.");
-            }
-            
-            // GET /admin/users - List all users and their credits
-            if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
-                const listResult = await creditsStore.list();
-                const keys = listResult?.keys || []; // Safely access keys
-
-                const users = await Promise.all(
-                    keys.map(async ({ name }: { name: string }) => {
-                        const credits = await creditsStore.get(name);
-                        // Safely parse credits, defaulting to 0 if invalid.
-                        return { email: name, credits: parseInt(credits as any, 10) || 0 };
-                    })
-                );
-                users.sort((a, b) => a.email.localeCompare(b.email)); // Sort alphabetically
-                return { statusCode: 200, body: JSON.stringify(users) };
-            }
-            
-            // POST /admin/users/add-credits - Add credits to a user
-            if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
-                if (!event.body) {
-                    return { statusCode: 400, body: JSON.stringify({ error: "Request body is missing." }) };
-                }
-
-                const { email, amount } = JSON.parse(event.body);
-                if (!email || typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0) {
-                    return { statusCode: 400, body: JSON.stringify({ error: "Invalid request. 'email' and a positive integer 'amount' are required." }) };
-                }
-                
-                const currentCredits = await getOrCreateUserCredits(creditsStore, email);
-                const newCredits = currentCredits + amount;
-                await creditsStore.set(email, newCredits);
-                
-                return { statusCode: 200, body: JSON.stringify({ credits: newCredits }) };
-            }
-
-            return { statusCode: 404, body: JSON.stringify({ error: "Admin route not found." }) };
-        } catch (kvError) {
-            console.error("Error with KV Store for admin action:", kvError);
-            const errorMessage = kvError instanceof Error ? kvError.message : "An unknown KV store error occurred.";
-            
-            // On deployed environments, a KV store failure is a critical error.
-            // This prevents the UI from silently showing mock data if the KV store is misconfigured.
-            if (CONTEXT !== 'dev') {
-                return { statusCode: 500, body: JSON.stringify({ error: `Database error: ${errorMessage}` }) };
-            }
-            
-            // ONLY in a local dev context, fall back to mock data for a better developer experience.
-            console.warn("KV Store unavailable in local dev environment. Returning mock data for admin panel.");
-            if (requestPath === 'admin/users' && event.httpMethod === 'GET') {
-                const mockUsers = [
-                    { email: 'user1@example.com', credits: 5 },
-                    { email: 'user2@example.com', credits: 1 },
-                    { email: 'admin@example.com', credits: 999 },
-                ];
-                return { statusCode: 200, body: JSON.stringify(mockUsers) };
-            }
-            if (requestPath === 'admin/users/add-credits' && event.httpMethod === 'POST') {
-                 return { statusCode: 200, body: JSON.stringify({ credits: 10 }) }; // Return a dummy success response
-            }
-
-            // Fallback for an unhandled dev-mode admin route
-            return { statusCode: 500, body: JSON.stringify({ error: `Database error in dev mode: ${errorMessage}` }) };
-        }
-    }
-
-
-    // --- REGULAR USER ENDPOINT ROUTING ---
-
-    // Handle GET and POST requests to the /credits endpoint
-    if (requestPath === 'credits') {
-        try {
-            const creditsStore = (context as any).netlify?.kvStore?.("credits");
-            if (!creditsStore) {
-                throw new Error("KV Store not available in this environment.");
-            }
-
-            if (event.httpMethod === 'GET') {
-                const credits = await getOrCreateUserCredits(creditsStore, userIdentifier);
-                return { statusCode: 200, body: JSON.stringify({ credits }) };
-            }
-
-            if (event.httpMethod === 'POST') {
-                const currentCredits = await getOrCreateUserCredits(creditsStore, userIdentifier);
-
-                if (currentCredits <= 0) {
-                    return { statusCode: 402, body: JSON.stringify({ error: "You are out of credits." }) }; // 402 Payment Required
-                }
-
-                const newCredits = currentCredits - 1;
-                await creditsStore.set(userIdentifier, newCredits);
-                return { statusCode: 200, body: JSON.stringify({ credits: newCredits }) };
-            }
-
-            // Return Method Not Allowed for other methods on /credits
-            return { statusCode: 405, body: JSON.stringify({ error: `Method ${event.httpMethod} Not Allowed on /credits` }) };
-        } catch (kvError) {
-             console.error("Error with KV Store for credits:", kvError);
-             const errorMessage = kvError instanceof Error ? kvError.message : "An unknown credit system error occurred.";
-
-             // On deployed environments, a credit system failure is a critical error.
-             if (CONTEXT !== 'dev') {
-                return { statusCode: 500, body: JSON.stringify({ error: `Credit system error: ${errorMessage}` }) };
-             }
-             
-             // ONLY in a local dev context, fall back to mock credits.
-             console.warn("Assuming local dev mode and granting mock credits due to KV store error.");
-             if (event.httpMethod === 'GET') {
-                 return { statusCode: 200, body: JSON.stringify({ credits: 3 }) };
-             }
-             if (event.httpMethod === 'POST') {
-                 // Pretend the credit was deducted successfully from a starting balance of 3.
-                 return { statusCode: 200, body: JSON.stringify({ credits: 2 }) };
-             }
-
-             return { statusCode: 500, body: JSON.stringify({ error: `Credit system error in dev mode: ${errorMessage}` }) };
-        }
-    }
-
-    // --- DEFAULT: PROXY TO GEMINI API ---
-    // All other POST requests are proxied to the Gemini API.
-    if (event.httpMethod === 'POST') {
-        // Dev requests get infinite credits and don't need to check balance
-        if (isDevRequest) {
-            // Passthrough to Gemini API
-        } else {
-            // For real users, perform a credit check before calling the expensive Gemini API.
+        if (requestPath === '/admin/users' && event.httpMethod === 'GET') {
             try {
-                const creditsStore = (context as any).netlify?.kvStore?.("credits");
-                if (!creditsStore) throw new Error("KV store is unavailable for pre-check.");
-                
-                const currentCredits = await getOrCreateUserCredits(creditsStore, userIdentifier);
-                if (currentCredits <= 0) {
-                    return { statusCode: 402, body: JSON.stringify({ error: "You are out of credits and cannot generate images." }) };
-                }
-            } catch (err) {
-                console.error("Failed to perform credit pre-check:", err);
-                const errorMessage = err instanceof Error ? err.message : "An unknown credit system error occurred.";
-                return { statusCode: 500, body: JSON.stringify({ error: `Credit system pre-check failed: ${errorMessage}` }) };
+                if (!firestore) throw new Error("Firestore not initialized.");
+                const usersSnapshot = await firestore.collection('users').get();
+                const users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                return jsonResponse(200, users);
+            } catch (error) {
+                console.error("Error fetching all users:", error);
+                return jsonResponse(500, { error: "Failed to fetch users." });
             }
         }
+        if (requestPath === '/admin/credits' && event.httpMethod === 'POST') {
+            try {
+                if (!firestore) throw new Error("Firestore not initialized.");
+                const { email, credits } = JSON.parse(event.body || '{}');
+                if (!email || typeof credits !== 'number' || credits < 0) {
+                    return jsonResponse(400, { error: "Invalid request. 'email' and 'credits' (non-negative number) are required." });
+                }
+                await firestore.collection('users').doc(email).set({ credits }, { merge: true });
+                return jsonResponse(200, { success: true, message: `Credits for ${email} updated to ${credits}.` });
+            } catch (error) {
+                console.error("Error updating user credits:", error);
+                return jsonResponse(500, { error: "Failed to update credits." });
+            }
+        }
+    }
 
-        const geminiUrl = `${GEMINI_API_BASE_URL}/${requestPath}?key=${API_KEY}`;
+    // --- PROXY TO GEMINI API ---
+    if (event.httpMethod === 'POST' && requestPath.includes(':generateContent')) {
         try {
-            const response = await fetch(geminiUrl, {
+            // Credit Check
+            const user = await getDbUser(userEmail);
+            if (!user || user.credits <= 0) {
+                return jsonResponse(402, { error: "You are out of credits." }); // 402 Payment Required
+            }
+
+            const geminiUrl = `${GEMINI_API_BASE_URL}/${requestPath.replace('/v1beta/models/', 'v1beta/models/')}?key=${API_KEY}`;
+            const geminiResponse = await fetch(geminiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: event.body,
             });
 
-            const responseBody = await response.text();
-            
-            if (!response.ok) {
-                console.error(`Gemini API Error (Status: ${response.status}):`, responseBody);
-                return {
-                    statusCode: response.status,
-                    headers: { 'Content-Type': response.headers.get('Content-Type') || 'text/plain' },
-                    body: responseBody,
-                };
+            const responseBody = await geminiResponse.text();
+
+            if (!geminiResponse.ok) {
+                console.error(`Gemini API Error (Status: ${geminiResponse.status}):`, responseBody);
+                return { statusCode: geminiResponse.status, body: responseBody };
             }
 
-            return {
-                statusCode: 200,
-                headers: { 'Content-Type': 'application/json' },
-                body: responseBody,
-            };
+            // Deduct credit on success
+            if (!firestore) throw new Error("Firestore not initialized.");
+            await firestore.collection('users').doc(userEmail).update({
+                credits: Firestore.FieldValue.increment(-1)
+            });
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: responseBody };
+
         } catch (error) {
-            console.error("Error in proxy function:", error);
-            return {
-                statusCode: 500,
-                body: JSON.stringify({ error: "An internal error occurred while contacting the AI model." }),
-            };
+            console.error("Error in Gemini proxy:", error);
+            return jsonResponse(500, { error: "An internal error occurred while contacting the AI model." });
         }
     }
 
-    // Fallback for any other unhandled paths or methods
-    return {
-        statusCode: 404,
-        body: JSON.stringify({ error: "Not Found" }),
-    };
+    return jsonResponse(404, { error: `Not Found. The path '${requestPath}' is not handled.` });
 };
 
 export { handler };

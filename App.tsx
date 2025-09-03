@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, { useState, ChangeEvent, useEffect } from 'react';
+import React, { useState, ChangeEvent, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { generateStyledImage, getUserCredits, deductUserCredit } from './services/geminiService';
+import { generateStyledImage, getCredits } from './services/geminiService';
 import PolaroidCard from './components/PolaroidCard';
 import { createAlbumPage } from './lib/albumUtils';
 import Footer from './components/Footer';
@@ -94,30 +94,35 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
     const [slideshowStartIndex, setSlideshowStartIndex] = useState(0);    
     const [customPrompt, setCustomPrompt] = useState('');
     const [credits, setCredits] = useState<number | null>(null);
-    const [creditsLoading, setCreditsLoading] = useState<boolean>(true);
-    const [creditUsedForCurrentImage, setCreditUsedForCurrentImage] = useState<boolean>(false);
+    const [paidForCurrentImage, setPaidForCurrentImage] = useState<boolean>(false);
+
+    const getAuthToken = useCallback(async (): Promise<string> => {
+        try {
+            const token = await getAccessTokenSilently();
+            if (!token) throw new Error("Could not retrieve access token.");
+            return token;
+        } catch (error) {
+            console.error("Error getting access token", error);
+            throw new Error("Authentication error: Could not get a token for the API. Please try logging in again.");
+        }
+    }, [getAccessTokenSilently]);
+
+    const fetchCredits = useCallback(async () => {
+        if (!isAuthenticated) return;
+        try {
+            const token = await getAuthToken();
+            const creditsData = await getCredits(token);
+            setCredits(creditsData.credits);
+        } catch (error) {
+            console.error("Failed to fetch credits:", error);
+            // Don't show an alert, but credits will remain null, showing a loading state.
+        }
+    }, [isAuthenticated, getAuthToken]);
 
     useEffect(() => {
-        if (isAuthenticated) {
-            const fetchCredits = async () => {
-                setCreditsLoading(true);
-                try {
-                    const token = await getAccessTokenSilently();
-                    const { credits } = await getUserCredits(token);
-                    setCredits(credits);
-                } catch (error) {
-                    console.error("Failed to fetch credits:", error);
-                    setCredits(0); // Assume no credits if fetch fails
-                } finally {
-                    setCreditsLoading(false);
-                }
-            };
-            fetchCredits();
-        } else {
-            setCredits(null);
-            setCreditsLoading(false);
-        }
-    }, [isAuthenticated, getAccessTokenSilently]);
+        fetchCredits();
+    }, [fetchCredits]);
+
 
     const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;
@@ -160,7 +165,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
             setUploadedImage(resizedImage);
             setAppState('image-uploaded');
             setGeneratedImages({});
-            setCreditUsedForCurrentImage(false);
+            setPaidForCurrentImage(false); // Reset payment status for new image
 
         } catch (error) {
             console.error("Error processing image:", error);
@@ -170,23 +175,20 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
             setIsProcessingUpload(false);
         }
     };
-
-    const getAuthToken = async (): Promise<string> => {
-        try {
-            const token = await getAccessTokenSilently();
-            if (!token) throw new Error("Could not retrieve access token.");
-            return token;
-        } catch (error) {
-            console.error("Error getting access token", error);
-            throw new Error("Authentication error: Could not get a token for the API. Please try logging in again.");
+    
+    const handleCreditDeduction = () => {
+        if (!paidForCurrentImage) {
+            setCredits(prev => (prev !== null ? prev - 1 : 0));
+            setPaidForCurrentImage(true);
         }
     }
+
 
     const handleGenerateTimeline = async () => {
         if (!uploadedImage) return;
 
         // Check if user has credits, unless they've already paid for this image.
-        if (!creditUsedForCurrentImage && credits !== null && credits <= 0) {
+        if (!paidForCurrentImage && credits !== null && credits <= 0) {
             alert("You are out of credits and cannot generate images from a new photo.");
             return;
         }
@@ -229,22 +231,8 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
         }
 
         // If at least one image was made, and we haven't charged for this upload yet, deduct a credit.
-        if (atLeastOneSuccess && !creditUsedForCurrentImage) {
-            try {
-                const token = await getAuthToken();
-                const { credits: newCredits } = await deductUserCredit(token);
-                setCredits(newCredits);
-                setCreditUsedForCurrentImage(true);
-            } catch (error) {
-                console.error(
-                    "Critical: Failed to deduct credit after a successful generation. " +
-                    "The user has received a free generation for this image upload. " +
-                    "Marking credit as used on the client to prevent further free generations.",
-                    error
-                );
-                // Mark as used anyway to prevent abuse.
-                setCreditUsedForCurrentImage(true);
-            }
+        if (atLeastOneSuccess) {
+            handleCreditDeduction();
         }
 
         setAppState('results-shown');
@@ -254,7 +242,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
         if (!uploadedImage || !customPrompt.trim()) return;
 
         // Check if user has credits, unless they've already paid for this image.
-        if (!creditUsedForCurrentImage && credits !== null && credits <= 0) {
+        if (!paidForCurrentImage && credits !== null && credits <= 0) {
             alert("You are out of credits and cannot generate images from a new photo.");
             return;
         }
@@ -278,22 +266,8 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
         }
 
         // If the image was made, and we haven't charged for this upload yet, deduct a credit.
-        if (wasSuccessful && !creditUsedForCurrentImage) {
-            try {
-                const token = await getAuthToken();
-                const { credits: newCredits } = await deductUserCredit(token);
-                setCredits(newCredits);
-                setCreditUsedForCurrentImage(true);
-            } catch (error) {
-                console.error(
-                    "Critical: Failed to deduct credit after a successful generation. " +
-                    "The user has received a free generation for this image upload. " +
-                    "Marking credit as used on the client to prevent further free generations.",
-                    error
-                );
-                // Mark as used anyway to prevent abuse.
-                setCreditUsedForCurrentImage(true);
-            }
+        if (wasSuccessful) {
+            handleCreditDeduction();
         }
 
         setAppState('results-shown');
@@ -315,7 +289,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
             setGeneratedImages(prev => ({ ...prev, [prompt]: { status: 'done', url: watermarkedUrl } }));
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-             if (errorMessage.includes("Authentication error")) {
+             if (errorMessage.includes("Authentication error") || errorMessage.includes("out of credits")) {
                 alert(errorMessage);
             }
             setGeneratedImages(prev => ({ ...prev, [prompt]: { status: 'error', error: errorMessage } }));
@@ -328,7 +302,8 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
         setGeneratedImages({});
         setAppState('idle');
         setCustomPrompt('');
-        setCreditUsedForCurrentImage(false);
+        setPaidForCurrentImage(false);
+        fetchCredits(); // Refresh credits when starting over
     };
 
     const handleDownloadIndividualImage = (prompt: string) => {
@@ -386,6 +361,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
         .map(image => ({ url: image.url!, caption: image.caption }));
 
     const hasNoCredits = credits !== null && credits <= 0;
+    const cannotGenerate = hasNoCredits && !paidForCurrentImage;
 
     return (
         <main className="bg-[#FFF9E8] text-stone-800 min-h-screen w-full flex flex-col items-center justify-center p-4 pb-32 overflow-hidden relative">
@@ -446,12 +422,12 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
                                     <p className="font-permanent-marker text-stone-600 text-2xl" aria-live="polite">
                                         Welcome, {user.name.split(' ')[0]}!
                                     </p>
-                                    {creditsLoading ? (
-                                        <p className="font-permanent-marker text-stone-500 text-lg animate-pulse">Checking credits...</p>
-                                    ) : credits !== null && (
+                                    {credits !== null ? (
                                         <p className="font-permanent-marker text-teal-600 text-lg">
                                             You have {credits} credit{credits === 1 ? '' : 's'} left.
                                         </p>
+                                    ) : (
+                                        <p className="font-permanent-marker text-stone-500 text-lg animate-pulse">Checking credits...</p>
                                     )}
                                 </div>
                             )}
@@ -482,10 +458,14 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
                             status="done"
                          />
                          <div className="w-full flex flex-col items-center gap-4">
-                            <button onClick={handleGenerateTimeline} disabled={creditsLoading || hasNoCredits} className={primaryButtonClasses}>
+                            <button onClick={handleGenerateTimeline} disabled={cannotGenerate} className={primaryButtonClasses}>
                                 Generate Timeline
                             </button>
-                            {hasNoCredits && <p className="text-red-600 font-permanent-marker -mt-2">You are out of credits!</p>}
+                            {cannotGenerate && (
+                                <p className="text-red-600 font-permanent-marker -mt-2">
+                                    You are out of credits!
+                                </p>
+                            )}
 
                             <div className="w-full text-center my-2">
                                 <span className="font-permanent-marker text-stone-500 text-lg">OR</span>
@@ -501,7 +481,7 @@ function App({ useAuthHook = useAuth0 }: AppProps) {
                                         placeholder="e.g., An oil painting, a futuristic robot..."
                                         className="w-full px-3 py-2 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
                                     />
-                                    <button onClick={handleGenerateCustom} disabled={!customPrompt.trim() || creditsLoading || hasNoCredits} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
+                                    <button onClick={handleGenerateCustom} disabled={!customPrompt.trim() || cannotGenerate} className={`${primaryButtonClasses} !text-base !py-2 !px-4`}>
                                         Go
                                     </button>
                                 </div>

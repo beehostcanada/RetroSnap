@@ -4,148 +4,150 @@
 */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { Link } from 'react-router-dom';
-import { getAdminUsers, addCreditsToUser, AdminUser } from '../services/geminiService';
+import { useNavigate } from 'react-router-dom';
+import { getAllUsers, updateUserCredits } from '../services/geminiService';
+import Footer from '../components/Footer';
 
-// IMPORTANT: This list must be kept in sync with the one in `netlify/functions/api-proxy.ts`
-// This is used for client-side checks to show/hide UI elements.
-// The actual security is enforced on the server.
-const ADMIN_USERS = ['ajbatac@gmail.com'];
+const ADMIN_EMAIL = 'dev@example.com'; // Should match the one in Footer.tsx and Netlify env vars
 
-interface AdminPageProps {
+interface User {
+    id: string;
+    email: string;
+    credits: number;
+}
+
+interface AppProps {
     useAuthHook?: () => any;
 }
 
-const AdminPage: React.FC<AdminPageProps> = ({ useAuthHook = useAuth0 }) => {
+const AdminPage = ({ useAuthHook = useAuth0 }: AppProps) => {
     const { user, isAuthenticated, isLoading, getAccessTokenSilently } = useAuthHook();
-    const [users, setUsers] = useState<AdminUser[]>([]);
-    const [loadingUsers, setLoadingUsers] = useState(true);
+    const navigate = useNavigate();
+    const [users, setUsers] = useState<User[]>([]);
+    const [loadingMessage, setLoadingMessage] = useState('Checking permissions...');
     const [error, setError] = useState<string | null>(null);
-    const [creditAmounts, setCreditAmounts] = useState<Record<string, string>>({});
-    const [addingCredits, setAddingCredits] = useState<Record<string, boolean>>({});
-
-    const isUserAdmin = user && ADMIN_USERS.includes(user.email);
+    const [editCredits, setEditCredits] = useState<Record<string, string>>({});
 
     const fetchUsers = useCallback(async () => {
-        setLoadingUsers(true);
+        setLoadingMessage('Fetching user data...');
         setError(null);
         try {
             const token = await getAccessTokenSilently();
-            const adminUsers = await getAdminUsers(token);
-            setUsers(adminUsers);
+            const userList = await getAllUsers(token);
+            // Sort by email for consistent ordering
+            userList.sort((a, b) => a.email.localeCompare(b.email));
+            setUsers(userList);
+            const initialEdits = userList.reduce((acc, u) => {
+                acc[u.email] = String(u.credits);
+                return acc;
+            }, {} as Record<string, string>);
+            setEditCredits(initialEdits);
         } catch (err) {
-            const message = err instanceof Error ? err.message : "An unknown error occurred";
-            setError(`Failed to load users: ${message}`);
-            console.error(err);
+            console.error("Failed to fetch users:", err);
+            setError(err instanceof Error ? err.message : 'An unknown error occurred.');
         } finally {
-            setLoadingUsers(false);
+            setLoadingMessage('');
         }
     }, [getAccessTokenSilently]);
 
     useEffect(() => {
-        if (isAuthenticated && isUserAdmin) {
+        if (isLoading) {
+            return; // Wait for auth state to be resolved
+        }
+        if (!isAuthenticated) {
+            navigate('/'); // Redirect if not logged in
+        } else if (user?.email !== ADMIN_EMAIL) {
+            setError('Access Denied. You are not authorized to view this page.');
+            setLoadingMessage('');
+        } else {
             fetchUsers();
         }
-    }, [isAuthenticated, isUserAdmin, fetchUsers]);
+    }, [isLoading, isAuthenticated, user, navigate, fetchUsers]);
 
-    const handleAddCredits = async (email: string) => {
-        const amountStr = creditAmounts[email] || '0';
-        const amount = parseInt(amountStr, 10);
+    const handleCreditChange = (email: string, value: string) => {
+        setEditCredits(prev => ({ ...prev, [email]: value }));
+    };
 
-        if (isNaN(amount) || amount <= 0) {
-            alert("Please enter a valid positive number of credits.");
+    const handleUpdateCredits = async (email: string) => {
+        const newCreditsStr = editCredits[email];
+        const newCredits = parseInt(newCreditsStr, 10);
+
+        if (isNaN(newCredits) || newCredits < 0) {
+            alert("Please enter a valid non-negative number for credits.");
             return;
         }
 
-        setAddingCredits(prev => ({ ...prev, [email]: true }));
         try {
             const token = await getAccessTokenSilently();
-            const result = await addCreditsToUser(token, email, amount);
-            setUsers(prevUsers => prevUsers.map(u => u.email === email ? { ...u, credits: result.credits } : u));
-            setCreditAmounts(prev => ({ ...prev, [email]: '' }));
+            await updateUserCredits(token, email, newCredits);
+            alert(`Successfully updated credits for ${email} to ${newCredits}.`);
+            // Refresh user list to confirm change
+            fetchUsers();
         } catch (err) {
-            const message = err instanceof Error ? err.message : "An unknown error occurred";
-            alert(`Failed to add credits: ${message}`);
-        } finally {
-            setAddingCredits(prev => ({ ...prev, [email]: false }));
+            console.error("Failed to update credits:", err);
+            alert(`Error: ${err instanceof Error ? err.message : 'An unknown error occurred.'}`);
         }
     };
 
-    if (isLoading) {
-        return <div className="p-8 text-center font-permanent-marker text-xl">Loading authentication...</div>;
-    }
-
-    if (!isAuthenticated) {
-        return <div className="p-8 text-center font-permanent-marker text-xl">Please log in to view this page.</div>;
-    }
-
-    if (!isUserAdmin) {
+    const renderContent = () => {
+        if (loadingMessage) {
+            return <p className="text-center text-stone-500 text-lg animate-pulse">{loadingMessage}</p>;
+        }
+        if (error) {
+            return <p className="text-center text-red-600 font-bold text-lg">{error}</p>;
+        }
         return (
-            <div className="p-8 text-center font-permanent-marker text-xl text-red-600">
-                You do not have permission to view this page.
-                <br />
-                <Link to="/" className="text-teal-600 hover:underline mt-4 inline-block">Go to Home</Link>
+            <div className="w-full max-w-4xl bg-white/50 p-6 rounded-lg shadow-md border border-stone-200">
+                <h2 className="text-3xl font-permanent-marker text-stone-700 mb-6 text-center">User Credit Management</h2>
+                <div className="overflow-x-auto">
+                    <table className="w-full min-w-[600px] text-left">
+                        <thead className="bg-stone-200/50">
+                            <tr>
+                                <th className="p-3 font-permanent-marker text-stone-600">Email</th>
+                                <th className="p-3 font-permanent-marker text-stone-600">Current Credits</th>
+                                <th className="p-3 font-permanent-marker text-stone-600 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {users.map(({ email, credits }) => (
+                                <tr key={email} className="border-b border-stone-200 last:border-b-0">
+                                    <td className="p-3 font-mono text-stone-800">{email}</td>
+                                    <td className="p-3 font-mono text-center text-stone-800">{credits}</td>
+                                    <td className="p-3">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <input
+                                                type="number"
+                                                value={editCredits[email] || ''}
+                                                onChange={(e) => handleCreditChange(email, e.target.value)}
+                                                className="w-24 px-2 py-1 border border-stone-300 rounded-sm text-center"
+                                                min="0"
+                                                aria-label={`New credit amount for ${email}`}
+                                            />
+                                            <button
+                                                onClick={() => handleUpdateCredits(email)}
+                                                className="font-permanent-marker text-sm text-center text-white bg-teal-500 py-1 px-4 rounded-sm transition-all duration-200 hover:bg-teal-600 disabled:bg-gray-400"
+                                            >
+                                                Update
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         );
-    }
-    
-    return (
-        <main className="bg-[#FFF9E8] text-stone-800 min-h-screen w-full flex flex-col items-center p-4 sm:p-8">
-            <div className="w-full max-w-4xl">
-                <div className="text-center mb-8">
-                    <h1 className="text-4xl sm:text-5xl md:text-6xl font-caveat font-bold text-rainbow">Admin Panel</h1>
-                    <p className="font-permanent-marker text-stone-600 mt-2 text-lg tracking-wide">User Credit Management</p>
-                    <Link to="/" className="font-permanent-marker text-teal-600 hover:underline mt-4 inline-block">&larr; Back to RetroSnap</Link>
-                </div>
+    };
 
-                {loadingUsers && <div className="text-center font-permanent-marker animate-pulse">Loading users...</div>}
-                {error && <div className="text-center font-sans text-red-600 bg-red-100 p-4 rounded-md">{error}</div>}
-                
-                {!loadingUsers && !error && (
-                    <div className="bg-white/50 shadow-lg rounded-lg overflow-hidden border border-stone-200">
-                        <table className="w-full text-left">
-                            <thead className="bg-stone-100 border-b border-stone-200">
-                                <tr>
-                                    <th className="p-4 font-permanent-marker text-stone-600">User Email</th>
-                                    <th className="p-4 font-permanent-marker text-stone-600 text-center">Credits</th>
-                                    <th className="p-4 font-permanent-marker text-stone-600">Add Credits</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {users.map((user) => (
-                                    <tr key={user.email} className="border-b border-stone-200 last:border-b-0 hover:bg-stone-50 transition-colors">
-                                        <td className="p-4 align-middle font-sans text-stone-700">{user.email}</td>
-                                        <td className="p-4 align-middle text-center font-bold font-permanent-marker text-2xl text-teal-600">{user.credits}</td>
-                                        <td className="p-4 align-middle">
-                                            <div className="flex items-center gap-2">
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    placeholder="Amount"
-                                                    value={creditAmounts[user.email] || ''}
-                                                    onChange={(e) => setCreditAmounts(prev => ({...prev, [user.email]: e.target.value}))}
-                                                    className="w-24 px-2 py-1 border border-stone-300 rounded-sm focus:outline-none focus:ring-2 focus:ring-teal-400"
-                                                    disabled={addingCredits[user.email]}
-                                                />
-                                                <button
-                                                    onClick={() => handleAddCredits(user.email)}
-                                                    disabled={addingCredits[user.email] || !creditAmounts[user.email]}
-                                                    className="font-permanent-marker text-sm text-center text-white bg-sky-600 py-1 px-3 rounded-sm transition-all duration-200 hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {addingCredits[user.email] ? 'Adding...' : 'Add'}
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        {users.length === 0 && (
-                            <p className="text-center p-8 font-permanent-marker text-stone-500">No users found.</p>
-                        )}
-                    </div>
-                )}
+    return (
+        <main className="bg-[#FFF9E8] text-stone-800 min-h-screen w-full flex flex-col items-center justify-center p-4 pb-32">
+            <div className="text-center mb-10">
+                <h1 className="text-4xl sm:text-5xl md:text-7xl font-caveat font-bold text-rainbow">RetroSnap</h1>
+                <p className="font-permanent-marker text-stone-600 mt-2 text-xl tracking-wide">Admin Panel</p>
             </div>
+            {renderContent()}
+            <Footer useAuthHook={useAuthHook} />
         </main>
     );
 };

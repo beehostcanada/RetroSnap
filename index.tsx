@@ -77,7 +77,7 @@ const AUTH0_AUDIENCE = `https://api.retrosnap.com`;
 const useDevAuth = () => ({
     user: {
         name: 'Dev User',
-        email: 'admin@example.com', // Using admin email for dev mode
+        email: 'dev@example.com',
         picture: `https://ui-avatars.com/api/?name=Dev+User&background=random`,
     },
     isAuthenticated: true,
@@ -120,6 +120,7 @@ const Main = () => {
                 audience: AUTH0_AUDIENCE,
             }}
         >
+            {/* Fix: `useAuthHook` is not defined in this scope. Passed the imported `useAuth0` hook instead. */}
             <AppWrapper useAuthHook={useAuth0} />
         </Auth0Provider>
     );

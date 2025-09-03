@@ -17,8 +17,9 @@
     "framer-motion": "^11.2.10",
     "clsx": "^2.1.1",
     "heic2any": "^0.0.4",
-    "@netlify/functions": "^2.7.0",
-    "@auth0/auth0-react": "^2.2.4"
+    "@auth0/auth0-react": "^2.2.4",
+    "@google-cloud/firestore": "^7.11.3",
+    "@netlify/functions": "^4.2.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
