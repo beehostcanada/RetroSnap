@@ -6,7 +6,9 @@ import type { Handler, HandlerEvent } from "@netlify/functions";
 import { Pool } from 'pg';
 
 // --- Environment Variables and Constants ---
-const { DATABASE_URL, AUTH0_DOMAIN, API_KEY, CONTEXT, ADMIN_EMAIL } = process.env;
+const { AUTH0_DOMAIN, API_KEY, CONTEXT, ADMIN_EMAIL } = process.env;
+// Prioritize the Netlify-specific variable, but fall back to the generic one for wider compatibility.
+const DATABASE_URL = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
 const INITIAL_CREDITS = 10;
 
@@ -16,7 +18,9 @@ let pool: Pool;
 if (DATABASE_URL) {
     pool = new Pool({
         connectionString: DATABASE_URL,
-        ssl: { rejectUnauthorized: false } 
+        // The `sslmode=require` parameter in the DATABASE_URL provided by Netlify's Neon
+        // integration is sufficient for node-postgres to establish a secure connection.
+        // Explicitly setting `ssl: { rejectUnauthorized: false }` is not best practice.
     });
 }
 
@@ -39,7 +43,7 @@ const dbInit = pool ? (async () => {
         // This will cause subsequent requests to fail, which is intended if the DB is not ready.
         throw err;
     }
-})() : Promise.reject("DATABASE_URL environment variable is not set.");
+})() : Promise.reject("Neither NETLIFY_DATABASE_URL nor DATABASE_URL environment variable is set.");
 
 
 // --- Helper Functions ---

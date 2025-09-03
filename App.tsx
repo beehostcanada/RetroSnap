@@ -333,7 +333,7 @@ function App() {
                         The application could not load critical user data after logging in. This is usually caused by a server-side configuration issue.
                     </p>
                     <p className="text-sm mb-6 font-sans text-stone-700">
-                        Please check the setup guide and verify your environment variables. The error details below may point to an issue with either your <strong>Auth0 API settings</strong> (e.g., Audience) or your <strong>Google Cloud/Firestore permissions</strong> (e.g., incorrect service account key or permissions).
+                        Please check the setup guide and verify your environment variables in your deployment platform (e.g., Netlify). The error details below may point to an issue with your <strong>Auth0 API settings</strong> (e.g., Audience) or your <strong>Neon Database connection</strong> (e.g., missing DATABASE_URL environment variable).
                     </p>
                     <details className="text-left bg-stone-50 p-3 rounded font-sans">
                         <summary className="cursor-pointer text-stone-800">Technical Details</summary>
