@@ -9,6 +9,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
 import AdminPage from './pages/AdminPage';
 import { UserProvider } from './contexts/AuthContext';
+import DebugPage from './pages/DebugPage';
 
 // --- Simple Error Boundary for Catching Critical Errors ---
 interface ErrorBoundaryProps {
@@ -110,6 +111,7 @@ const AppWrapper = () => {
             <Routes>
                 <Route path="/" element={<App />} />
                 <Route path="/admin" element={<AdminPage />} />
+                <Route path="/debug" element={<DebugPage />} />
             </Routes>
         </BrowserRouter>
     );

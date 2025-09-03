@@ -103,6 +103,15 @@ export async function updateUserCredits(token: string, email: string, credits: n
     });
 }
 
+/**
+ * Fetches debug information from the backend.
+ * @param token The user's JWT.
+ * @returns A promise that resolves to the debug info object.
+ */
+export async function getDebugInfo(token: string): Promise<any> {
+    return apiFetch('/debug-info', token);
+}
+
 
 // --- Gemini API Service ---
 

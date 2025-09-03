@@ -123,6 +123,30 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     console.log(`[AUTH_CHECK] Path: ${requestPath} | Admin Email (env): ${maskEmail(ADMIN_EMAIL)} | User Email (auth): ${maskEmail(userEmail)} | IsAdmin: ${isAdmin}`);
 
 
+    // --- DEBUG ROUTE ---
+    if (requestPath === '/debug-info' && event.httpMethod === 'GET') {
+        try {
+            const adminEmailEnv = ADMIN_EMAIL || ''; // Handle case where it might be undefined
+            const match = adminEmailEnv.trim().toLowerCase() === userEmail.trim().toLowerCase();
+            
+            const debugInfo = {
+                adminCheck: {
+                    envVarName: "ADMIN_EMAIL",
+                    envVarValueMasked: maskEmail(adminEmailEnv),
+                    userValueName: "Authenticated User Email",
+                    userValue: userEmail, // It's okay to show the user their own email
+                    matched: match,
+                }
+            };
+
+            return jsonResponse(200, debugInfo);
+        } catch (error) {
+            console.error("Error generating debug info:", error);
+            return jsonResponse(500, { error: "Failed to generate debug information.", details: getErrorMessage(error) });
+        }
+    }
+
+
     // --- USER ROUTES ---
     if (requestPath === '/credits' && event.httpMethod === 'GET') {
         try {

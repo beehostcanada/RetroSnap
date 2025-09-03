@@ -42,6 +42,14 @@ const Footer = () => {
                             <span className="text-sky-400" aria-hidden="true">|</span>
                         </>
                     )}
+                    {isAuthenticated && (
+                         <>
+                            <Link to="/debug" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">
+                                Debug
+                            </Link>
+                            <span className="text-sky-400" aria-hidden="true">|</span>
+                        </>
+                    )}
                     <p>
                         Original by{' '}
                         <a

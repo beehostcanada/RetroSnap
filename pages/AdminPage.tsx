@@ -28,7 +28,7 @@ const LockIcon = () => (
 
 
 const AdminPage = () => {
-    const { isAuthenticated, isLoading, isAdmin, error } = useUserContext();
+    const { isAuthenticated, isLoading, isAdmin, error, user } = useUserContext();
     const navigate = useNavigate();
     const [isExpanded, setIsExpanded] = useState(true); // Keep the single item expanded by default
 
@@ -68,8 +68,14 @@ const AdminPage = () => {
             return (
                 <div className="text-center">
                     <h1 className="text-3xl font-bold mb-4 text-red-400">Access Denied</h1>
-                    <p className="text-slate-300">You are not authorized to view this page.</p>
-                    <Link to="/" className="mt-6 text-teal-400 hover:text-teal-300 transition-colors">Go back to the homepage</Link>
+                    {user?.email ? (
+                        <p className="text-slate-300 max-w-lg mx-auto">
+                            Your account (<strong className="text-white">{user.email}</strong>) is not configured as an administrator. Please verify that the <code>ADMIN_EMAIL</code> environment variable in your project's deployment settings matches this email address exactly.
+                        </p>
+                    ) : (
+                        <p className="text-slate-300">You are not authorized to view this page.</p>
+                    )}
+                    <Link to="/" className="mt-6 inline-block text-teal-400 hover:text-teal-300 transition-colors">Go back to the homepage</Link>
                 </div>
             );
         }
