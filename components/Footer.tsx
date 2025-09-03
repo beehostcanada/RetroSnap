@@ -34,14 +34,6 @@ const Footer = () => {
 
                 {/* Right Side */}
                 <div className="flex-grow flex justify-end items-center gap-4 sm:gap-6 text-white-500 whitespace-nowrap">
-                    {showAdminLink && (
-                        <>
-                            <Link to="/admin" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">
-                                Admin Panel
-                            </Link>
-                            <span className="text-sky-400" aria-hidden="true">|</span>
-                        </>
-                    )}
                     {isAuthenticated && (
                          <>
                             <Link to="/debug" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">

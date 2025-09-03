@@ -4,7 +4,7 @@
 */
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useAuth0, User } from '@auth0/auth0-react';
-import { getCredits } from '../services/geminiService';
+import { fetchUserData } from '../services/geminiService';
 
 type Status = 'pending' | 'loading' | 'success' | 'error';
 
@@ -19,7 +19,7 @@ interface UserContextType {
     loginWithRedirect: (options?: any) => Promise<void>;
     logout: (options?: any) => void;
     getAccessTokenSilently: (options?: any) => Promise<string>;
-    fetchUserData: () => void;
+    deductCredit: () => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -47,8 +47,6 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const [error, setError] = useState<Error | null>(null);
 
     // This single effect orchestrates the entire session verification and data loading process.
-    // It's architected to be resilient to race conditions and to clearly distinguish between
-    // a "logged out" state and a true application error.
     useEffect(() => {
         if (isMock) {
             setStatus('success');
@@ -57,29 +55,26 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
 
         const verifySessionAndFetchData = async () => {
             setStatus('loading');
-            setError(null); // Clear previous errors on a new attempt.
+            setError(null);
 
-            // If Auth0 says we are not authenticated, that is our source of truth.
-            // We consider this a 'success' in determining the user's state (they are logged out).
             if (!auth.isAuthenticated) {
+                // User is logged out. Clear all session state.
                 setCredits(null);
                 setIsAdmin(false);
                 setStatus('success');
                 return;
             }
 
-            // If we reach here, Auth0 believes the user IS authenticated.
-            // Any failure from this point on is a critical application error (e.g., backend misconfiguration).
+            // User is authenticated. Fetch admin status and persistent credits from the backend.
             try {
                 const token = await auth.getAccessTokenSilently();
-                const data = await getCredits(token);
-                setCredits(data.credits);
-                setIsAdmin(data.isAdmin);
+                const { isAdmin, credits } = await fetchUserData(token);
+                setIsAdmin(isAdmin);
+                setCredits(credits);
+                
                 setStatus('success');
             } catch (err: any) {
                 console.error("Critical error during authenticated data fetch:", err);
-                // The error is guaranteed to be a real problem, not a login issue.
-                // We set the error state so UI components like AdminPage can display it.
                 setError(err as Error);
                 setStatus('error');
                 setCredits(null);
@@ -87,27 +82,24 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
             }
         };
 
-        // We only run the verification logic once the Auth0 SDK is finished loading.
         if (!auth.isLoading) {
             verifySessionAndFetchData();
         }
     }, [auth.isLoading, auth.isAuthenticated, auth.getAccessTokenSilently, isMock]);
 
 
-    // This function is for MANUAL refreshes (e.g., after an action).
-    const fetchUserData = useCallback(async () => {
-        if (isMock || !auth.isAuthenticated) {
+    // Function to decrement credits locally for immediate UI feedback.
+    // The authoritative deduction happens on the backend.
+    const deductCredit = useCallback(() => {
+        if (isMock) {
+            auth.deductCredit();
             return;
         }
-        try {
-            const token = await auth.getAccessTokenSilently();
-            const data = await getCredits(token);
-            setCredits(data.credits);
-            setIsAdmin(data.isAdmin);
-        } catch (error) {
-            console.error("Manual user data refresh failed:", error);
-        }
-    }, [isMock, auth.isAuthenticated, auth.getAccessTokenSilently]);
+        setCredits(prev => {
+            if (prev === null) return null;
+            return Math.max(0, prev - 1);
+        });
+    }, [isMock, auth]);
 
     const value: UserContextType = {
         user: auth.user,
@@ -120,7 +112,7 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
         loginWithRedirect: auth.loginWithRedirect,
         logout: auth.logout,
         getAccessTokenSilently: auth.getAccessTokenSilently,
-        fetchUserData
+        deductCredit
     };
 
     return (

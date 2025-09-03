@@ -81,7 +81,7 @@ const resizeImage = (imageDataUrl: string, maxWidth: number, maxHeight: number):
 };
 
 function App() {
-    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently, credits, fetchUserData, error } = useUserContext();
+    const { user, isAuthenticated, isLoading, loginWithRedirect, getAccessTokenSilently, credits, deductCredit, error } = useUserContext();
     const [uploadedImage, setUploadedImage] = useState<string | null>(null);
     const [generatedImages, setGeneratedImages] = useState<Record<string, GeneratedImage>>({});
     const [isDownloading, setIsDownloading] = useState<boolean>(false);
@@ -90,7 +90,6 @@ function App() {
     const [slideshowOpen, setSlideshowOpen] = useState(false);
     const [slideshowStartIndex, setSlideshowStartIndex] = useState(0);    
     const [customPrompt, setCustomPrompt] = useState('');
-    const [paidForCurrentImage, setPaidForCurrentImage] = useState<boolean>(false);
 
     const getAuthToken = useCallback(async (): Promise<string> => {
         try {
@@ -144,7 +143,6 @@ function App() {
             setUploadedImage(resizedImage);
             setAppState('image-uploaded');
             setGeneratedImages({});
-            setPaidForCurrentImage(false); // Reset payment status for new image
 
         } catch (error) {
             console.error("Error processing image:", error);
@@ -154,21 +152,12 @@ function App() {
             setIsProcessingUpload(false);
         }
     };
-    
-    const handleCreditDeduction = () => {
-        if (!paidForCurrentImage) {
-            fetchUserData(); // Refresh credits from the source of truth
-            setPaidForCurrentImage(true);
-        }
-    }
-
 
     const handleGenerateTimeline = async () => {
         if (!uploadedImage) return;
 
-        // Check if user has credits, unless they've already paid for this image.
-        if (!paidForCurrentImage && credits !== null && credits <= 0) {
-            alert("You are out of credits and cannot generate images from a new photo.");
+        if (credits !== null && credits <= 0) {
+            alert("You are out of credits.");
             return;
         }
 
@@ -187,13 +176,17 @@ function App() {
             for (const decade of DECADES) {
                 try {
                     const prompt = `Change the style of this photograph to look like it was taken in the ${decade}. Adapt the clothing, hair, and photo quality to match the era, but keep the person's face recognizable.`;
+                    // The backend now handles credit deduction, so we just call the service.
                     const resultUrl = await generateStyledImage(uploadedImage, prompt, token);
                     const watermarkedUrl = await addWatermark(resultUrl);
                     setGeneratedImages(prev => ({
                         ...prev,
                         [decade]: { status: 'done', url: watermarkedUrl },
                     }));
-                    atLeastOneSuccess = true;
+                    if (!atLeastOneSuccess) {
+                        deductCredit(); // Deduct credit on first success for UI feedback
+                        atLeastOneSuccess = true;
+                    }
                 } catch (err) {
                     const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
                     setGeneratedImages(prev => ({
@@ -209,20 +202,14 @@ function App() {
              return;
         }
 
-        // If at least one image was made, and we haven't charged for this upload yet, deduct a credit.
-        if (atLeastOneSuccess) {
-            handleCreditDeduction();
-        }
-
         setAppState('results-shown');
     };
 
     const handleGenerateCustom = async () => {
         if (!uploadedImage || !customPrompt.trim()) return;
 
-        // Check if user has credits, unless they've already paid for this image.
-        if (!paidForCurrentImage && credits !== null && credits <= 0) {
-            alert("You are out of credits and cannot generate images from a new photo.");
+        if (credits !== null && credits <= 0) {
+            alert("You are out of credits.");
             return;
         }
 
@@ -230,23 +217,17 @@ function App() {
         const prompt = customPrompt.trim();
         setGeneratedImages({ [prompt]: { status: 'pending' } });
 
-        let wasSuccessful = false;
         try {
             const token = await getAuthToken();
             const fullPrompt = `Change the style of this photograph to look like: ${prompt}. Adapt the original photo to match the new style, but keep the person's face recognizable.`;
             const resultUrl = await generateStyledImage(uploadedImage, fullPrompt, token);
             const watermarkedUrl = await addWatermark(resultUrl);
             setGeneratedImages({ [prompt]: { status: 'done', url: watermarkedUrl } });
-            wasSuccessful = true;
+            deductCredit(); // Deduct credit on success for UI feedback
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
             setGeneratedImages({ [prompt]: { status: 'error', error: errorMessage } });
             console.error(`Failed to generate custom image for prompt "${prompt}":`, err);
-        }
-
-        // If the image was made, and we haven't charged for this upload yet, deduct a credit.
-        if (wasSuccessful) {
-            handleCreditDeduction();
         }
 
         setAppState('results-shown');
@@ -281,8 +262,6 @@ function App() {
         setGeneratedImages({});
         setAppState('idle');
         setCustomPrompt('');
-        setPaidForCurrentImage(false);
-        fetchUserData(); // Refresh credits when starting over
     };
 
     const handleDownloadIndividualImage = (prompt: string) => {
@@ -339,8 +318,7 @@ function App() {
         .filter(image => image.status === 'done' && image.url)
         .map(image => ({ url: image.url!, caption: image.caption }));
 
-    const hasNoCredits = credits !== null && credits <= 0;
-    const cannotGenerate = hasNoCredits && !paidForCurrentImage;
+    const cannotGenerate = credits !== null && credits <= 0;
 
     const renderContent = () => {
         if (isLoading) {
@@ -460,8 +438,8 @@ function App() {
                             Generate Timeline
                         </button>
                         {cannotGenerate && (
-                            <p className="text-red-600 font-permanent-marker -mt-2">
-                                You are out of credits!
+                            <p className="text-red-600 font-permanent-marker -mt-2 text-center">
+                                Out of credits!
                             </p>
                         )}
 

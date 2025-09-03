@@ -24,11 +24,11 @@ interface MinimalGenerateContentResponse {
     candidates?: Candidate[];
 }
 
-// --- API Service for Credits and Admin Actions ---
+// --- API Service for stateless checks and admin actions ---
 
 /**
  * A generic fetch wrapper for making authenticated API calls to our backend.
- * @param endpoint The API endpoint to call (e.g., '/credits').
+ * @param endpoint The API endpoint to call (e.g., '/check-admin').
  * @param token The user's JWT for authentication.
  * @param options Additional fetch options (method, body, etc.).
  * @returns The JSON response from the API.
@@ -58,8 +58,9 @@ async function apiFetch(endpoint: string, token: string, options: RequestInit = 
         }
         
         if (response.status === 401) throw new Error("Authentication failed. Please log out and log back in.");
-        if (response.status === 403) throw new Error("Forbidden: You do not have permission to perform this action.");
         
+        if (response.status === 402) throw new Error("You are out of credits.");
+
         throw new Error(`API request failed: ${errorMessage}`);
     }
 
@@ -71,37 +72,16 @@ async function apiFetch(endpoint: string, token: string, options: RequestInit = 
     return JSON.parse(responseBodyText);
 }
 
+
 /**
- * Fetches the current user's credit balance and admin status from the backend.
+ * Fetches the user's core data, including admin status and credit count.
  * @param token The user's JWT.
- * @returns A promise that resolves to an object containing the user's credits and admin status.
+ * @returns A promise that resolves to an object with the user's data.
  */
-export async function getCredits(token: string): Promise<{ credits: number; isAdmin: boolean }> {
-    return apiFetch('/credits', token);
+export async function fetchUserData(token: string): Promise<{ isAdmin: boolean; credits: number }> {
+    return apiFetch('/user-data', token);
 }
 
-/**
- * (Admin only) Fetches all users and their credit balances.
- * @param token The admin's JWT.
- * @returns A promise that resolves to an array of user data.
- */
-export async function getAllUsers(token: string): Promise<Array<{ id: string; email: string; credits: number }>> {
-    return apiFetch('/admin/users', token);
-}
-
-/**
- * (Admin only) Updates a specific user's credit balance.
- * @param token The admin's JWT.
- * @param email The email of the user to update.
- * @param credits The new credit amount.
- * @returns A promise that resolves on success.
- */
-export async function updateUserCredits(token: string, email: string, credits: number): Promise<void> {
-    return apiFetch('/admin/credits', token, {
-        method: 'POST',
-        body: JSON.stringify({ email, credits }),
-    });
-}
 
 /**
  * Fetches debug information from the backend.
@@ -189,7 +169,8 @@ async function callApiWithFetchAndRetry(imagePart: object, textPart: object, tok
                 if (response.status === 401) {
                     throw new Error("Authentication failed. Please log out and log back in.");
                 }
-                 if (response.status === 402) {
+                
+                if (response.status === 402) {
                     throw new Error("You are out of credits.");
                 }
 

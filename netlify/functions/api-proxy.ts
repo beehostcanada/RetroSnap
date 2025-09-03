@@ -2,32 +2,11 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import type { Handler, HandlerEvent, HandlerContext } from "@netlify/functions";
-// Use require for compatibility with different Node module resolution strategies in serverless environments.
-const { Firestore } = require('@google-cloud/firestore');
+import type { Handler, HandlerEvent } from "@netlify/functions";
+import { getStore } from "@netlify/blobs";
 
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
-const INITIAL_CREDITS = 3;
-
-// --- Firestore Client Initialization ---
-// FIX: 'Firestore' from require() is a value, but was used as a type. Using an import type to get the Firestore instance type.
-let firestore: import('@google-cloud/firestore').Firestore | null = null;
-const initializeFirestore = () => {
-    if (firestore) {
-        return;
-    }
-    const { GCP_PROJECT_ID, GCP_PRIVATE_KEY, GCP_CLIENT_EMAIL } = process.env;
-    if (!GCP_PROJECT_ID || !GCP_PRIVATE_KEY || !GCP_CLIENT_EMAIL) {
-        throw new Error("Missing required GCP environment variables for Firestore connection.");
-    }
-    firestore = new Firestore({
-        projectId: GCP_PROJECT_ID,
-        credentials: {
-            private_key: GCP_PRIVATE_KEY.replace(/\\n/g, '\n'), // Important for Netlify env vars
-            client_email: GCP_CLIENT_EMAIL,
-        },
-    });
-};
+const INITIAL_CREDITS = 10;
 
 // --- Helper Functions ---
 const jsonResponse = (statusCode: number, body: object) => ({
@@ -49,44 +28,28 @@ const maskEmail = (email?: string): string => {
     return `${localPart.substring(0, 2)}...${localPart.slice(-1)}@${domain}`;
 };
 
+interface AuthenticatedUser {
+    email: string;
+    id: string; // The Auth0 `sub` identifier
+}
 
-const getDbUser = async (email: string) => {
-    if (!firestore) throw new Error("Firestore not initialized.");
-    const userRef = firestore.collection('users').doc(email);
-    const userDoc = await userRef.get();
-
-    if (!userDoc.exists) {
-        // Create user with initial credits
-        const newUser = { email, credits: INITIAL_CREDITS };
-        await userRef.set(newUser);
-        return newUser;
-    }
-    return userDoc.data();
-};
-
-const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+const handler: Handler = async (event: HandlerEvent) => {
     const { AUTH0_DOMAIN, API_KEY, CONTEXT, ADMIN_EMAIL } = process.env;
 
     // --- VALIDATE ENVIRONMENT ---
     if (!AUTH0_DOMAIN || !API_KEY || !ADMIN_EMAIL) {
         return jsonResponse(500, { error: "Server is not configured correctly. Missing required environment variables." });
     }
-    try {
-        initializeFirestore();
-    } catch (error) {
-        console.error("Firestore Initialization Error:", error);
-        return jsonResponse(500, { error: "Could not connect to the database.", details: getErrorMessage(error) });
-    }
     // --- END VALIDATE ENVIRONMENT ---
 
 
     // --- AUTHENTICATION & USER IDENTIFICATION ---
-    let userEmail: string | null = null;
+    let user: AuthenticatedUser;
     const authHeader = event.headers['authorization'];
     const isDevRequest = authHeader === 'Bearer dev-token' && CONTEXT === 'dev';
 
     if (isDevRequest) {
-        userEmail = 'dev@example.com';
+        user = { email: 'dev@example.com', id: 'auth0|dev-user-12345' };
     } else {
         if (!authHeader) {
             return jsonResponse(401, { error: "Unauthorized: Missing Authorization header." });
@@ -99,43 +62,37 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
                 return jsonResponse(401, { error: "Unauthorized: Invalid token." });
             }
             const userInfo = await userInfoResponse.json();
-            if (!userInfo || typeof userInfo.email !== 'string') {
-                return jsonResponse(400, { error: "User email not found in token." });
+            if (!userInfo || typeof userInfo.email !== 'string' || typeof userInfo.sub !== 'string') {
+                return jsonResponse(400, { error: "User email or ID not found in token." });
             }
-            userEmail = userInfo.email;
+            user = { email: userInfo.email, id: userInfo.sub };
         } catch (error) {
             console.error("Error validating token with Auth0:", error);
             return jsonResponse(500, { error: "An internal error occurred during authentication.", details: getErrorMessage(error) });
         }
-    }
-
-    if (!userEmail) {
-        return jsonResponse(401, { error: "Could not identify user." });
     }
     // --- END AUTHENTICATION ---
     
     // --- API ROUTER ---
     const requestPath = event.path.replace('/api-proxy', '');
     
-    // Trim whitespace and compare emails case-insensitively for robustness.
-    const isAdmin = ADMIN_EMAIL && userEmail.trim().toLowerCase() === ADMIN_EMAIL.trim().toLowerCase();
+    const isAdmin = user && ADMIN_EMAIL && user.email.trim().toLowerCase() === ADMIN_EMAIL.trim().toLowerCase();
 
-    // Log the authorization check details for easier debugging in production.
-    console.log(`[AUTH_CHECK] Path: ${requestPath} | Admin Email (env): ${maskEmail(ADMIN_EMAIL)} | User Email (auth): ${maskEmail(userEmail)} | IsAdmin: ${isAdmin}`);
+    console.log(`[AUTH_CHECK] Path: ${requestPath} | User: ${maskEmail(user.email)} | IsAdmin: ${isAdmin}`);
 
 
     // --- DEBUG ROUTE ---
     if (requestPath === '/debug-info' && event.httpMethod === 'GET') {
         try {
-            const adminEmailEnv = ADMIN_EMAIL || ''; // Handle case where it might be undefined
-            const match = adminEmailEnv.trim().toLowerCase() === userEmail.trim().toLowerCase();
+            const adminEmailEnv = ADMIN_EMAIL || ''; 
+            const match = adminEmailEnv.trim().toLowerCase() === user.email.trim().toLowerCase();
             
             const debugInfo = {
                 adminCheck: {
                     envVarName: "ADMIN_EMAIL",
                     envVarValueMasked: maskEmail(adminEmailEnv),
                     userValueName: "Authenticated User Email",
-                    userValue: userEmail, // It's okay to show the user their own email
+                    userValue: user.email,
                     matched: match,
                 }
             };
@@ -148,59 +105,45 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
     }
 
 
-    // --- USER ROUTES ---
-    if (requestPath === '/credits' && event.httpMethod === 'GET') {
+    // --- USER DATA ROUTE (credits and admin status) ---
+    if (requestPath === '/user-data' && event.httpMethod === 'GET') {
+        const creditsStore = getStore('retrosnap_credits');
         try {
-            const user = await getDbUser(userEmail);
-            return jsonResponse(200, { credits: user?.credits ?? 0, isAdmin });
+            const creditsStr = await creditsStore.get(user.id);
+            let credits: number;
+
+            if (creditsStr === undefined) {
+                // This is a new user, grant initial credits.
+                credits = INITIAL_CREDITS;
+                await creditsStore.set(user.id, String(credits));
+                console.log(`Initialized credits for new user ${maskEmail(user.email)}.`);
+            } else {
+                credits = parseInt(creditsStr, 10);
+            }
+            return jsonResponse(200, { isAdmin, credits });
         } catch (error) {
-            console.error("Error getting user credits:", error);
-            return jsonResponse(500, { error: "Failed to retrieve user credits.", details: getErrorMessage(error) });
-        }
-    }
-
-    // --- ADMIN ROUTES ---
-    if (requestPath.startsWith('/admin')) {
-        if (!isAdmin) {
-            return jsonResponse(403, { error: "Forbidden: Admin access required." });
-        }
-
-        if (requestPath === '/admin/users' && event.httpMethod === 'GET') {
-            try {
-                if (!firestore) throw new Error("Firestore not initialized.");
-                const usersSnapshot = await firestore.collection('users').get();
-                const users = usersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                return jsonResponse(200, users);
-            } catch (error) {
-                console.error("Error fetching all users:", error);
-                return jsonResponse(500, { error: "Failed to fetch users.", details: getErrorMessage(error) });
-            }
-        }
-        if (requestPath === '/admin/credits' && event.httpMethod === 'POST') {
-            try {
-                if (!firestore) throw new Error("Firestore not initialized.");
-                const { email, credits } = JSON.parse(event.body || '{}');
-                if (!email || typeof credits !== 'number' || credits < 0) {
-                    return jsonResponse(400, { error: "Invalid request. 'email' and 'credits' (non-negative number) are required." });
-                }
-                await firestore.collection('users').doc(email).set({ credits }, { merge: true });
-                return jsonResponse(200, { success: true, message: `Credits for ${email} updated to ${credits}.` });
-            } catch (error) {
-                console.error("Error updating user credits:", error);
-                return jsonResponse(500, { error: "Failed to update credits.", details: getErrorMessage(error) });
-            }
+            console.error(`Error fetching credits for user ${maskEmail(user.email)}:`, error);
+            return jsonResponse(500, { error: "Failed to retrieve user credit data.", details: getErrorMessage(error) });
         }
     }
 
     // --- PROXY TO GEMINI API ---
     if (event.httpMethod === 'POST' && requestPath.includes(':generateContent')) {
+        const creditsStore = getStore('retrosnap_credits');
         try {
-            // Credit Check
-            const user = await getDbUser(userEmail);
-            if (!user || user.credits <= 0) {
-                return jsonResponse(402, { error: "You are out of credits." }); // 402 Payment Required
+            const creditsStr = await creditsStore.get(user.id);
+            const credits = parseInt(creditsStr || '0', 10);
+
+            if (credits <= 0) {
+                console.log(`Request blocked for user ${maskEmail(user.email)}: Out of credits.`);
+                return jsonResponse(402, { error: "You are out of credits." });
             }
 
+            // Deduct credit *before* the expensive API call.
+            await creditsStore.set(user.id, String(credits - 1));
+            console.log(`Credit deducted for ${maskEmail(user.email)}. New balance: ${credits - 1}`);
+            
+            // Proceed to proxy the request to the Gemini API
             const geminiUrl = `${GEMINI_API_BASE_URL}/${requestPath.replace('/v1beta/models/', 'v1beta/models/')}?key=${API_KEY}`;
             const geminiResponse = await fetch(geminiUrl, {
                 method: 'POST',
@@ -212,21 +155,10 @@ const handler: Handler = async (event: HandlerEvent, context: HandlerContext) =>
 
             if (!geminiResponse.ok) {
                 console.error(`Gemini API Error (Status: ${geminiResponse.status}):`, responseBody);
+                // Note: We do not refund the credit on API failure to keep the logic simple.
+                // This prevents abuse and handles cases where failure is due to a bad user prompt.
                 return { statusCode: geminiResponse.status, body: responseBody };
             }
-
-            // Deduct credit on success using a transaction for atomicity
-            if (!firestore) throw new Error("Firestore not initialized.");
-            const userRef = firestore.collection('users').doc(userEmail);
-            await firestore.runTransaction(async (transaction: any) => {
-                const userDoc = await transaction.get(userRef);
-                if (!userDoc.exists) {
-                    return; // Should not happen if user was fetched before, but good to handle.
-                }
-                const newCredits = Math.max(0, (userDoc.data()?.credits || 0) - 1);
-                transaction.update(userRef, { credits: newCredits });
-            });
-
 
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: responseBody };
 

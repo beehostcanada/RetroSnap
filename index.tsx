@@ -7,7 +7,6 @@ import ReactDOM from 'react-dom/client';
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import App from './App';
-import AdminPage from './pages/AdminPage';
 import { UserProvider } from './contexts/AuthContext';
 import DebugPage from './pages/DebugPage';
 
@@ -95,7 +94,7 @@ const DevProvider = ({ children }: { children: ReactNode }) => {
         getAccessTokenSilently: async () => 'dev-token',
         credits: 99,
         isAdmin: true,
-        fetchUserData: () => console.log('Mock fetchUserData called.'),
+        deductCredit: () => console.log('Mock credit deducted.'),
     };
 
     return (
@@ -110,7 +109,6 @@ const AppWrapper = () => {
         <BrowserRouter>
             <Routes>
                 <Route path="/" element={<App />} />
-                <Route path="/admin" element={<AdminPage />} />
                 <Route path="/debug" element={<DebugPage />} />
             </Routes>
         </BrowserRouter>
