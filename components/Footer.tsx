@@ -8,8 +8,11 @@ import { useUserContext } from '../contexts/AuthContext';
 
 
 const Footer = () => {
-    const { user, isAuthenticated, isAdmin, logout } = useUserContext();
+    const { user, isAuthenticated, isLoading, isUserDataLoading, isAdmin, logout } = useUserContext();
     
+    // Only show the admin link when all loading is complete and the user is confirmed to be an admin.
+    const showAdminLink = !isLoading && !isUserDataLoading && isAdmin;
+
     return (
         <footer className="fixed bottom-0 left-0 right-0 bg-sky-600 p-3 z-50 text-sky-100 text-xs sm:text-sm border-t border-sky-300">
             <div className="max-w-screen-xl mx-auto flex justify-between items-center gap-4 px-4">
@@ -30,7 +33,7 @@ const Footer = () => {
 
                 {/* Right Side */}
                 <div className="flex-grow flex justify-end items-center gap-4 sm:gap-6 text-white-500 whitespace-nowrap">
-                    {isAdmin && (
+                    {showAdminLink && (
                         <>
                             <Link to="/admin" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">
                                 Admin Panel

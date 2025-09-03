@@ -9,7 +9,8 @@ import { getCredits } from '../services/geminiService';
 interface UserContextType {
     user: User | undefined;
     isAuthenticated: boolean;
-    isLoading: boolean;
+    isLoading: boolean; // Tracks Auth0 loading state
+    isUserDataLoading: boolean; // Tracks our app's backend data fetching state
     isAdmin: boolean;
     credits: number | null;
     loginWithRedirect: (options?: any) => Promise<void>;
@@ -48,6 +49,7 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
         }
 
         if (auth.isAuthenticated) {
+            setIsUserDataLoading(true);
             try {
                 const token = await auth.getAccessTokenSilently();
                 const data = await getCredits(token);
@@ -76,9 +78,8 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const value: UserContextType = {
         user: auth.user,
         isAuthenticated: auth.isAuthenticated,
-        // The app is considered "loading" if Auth0 is loading, or if we've authenticated
-        // but haven't finished fetching our own user data (credits, admin status).
-        isLoading: auth.isLoading || (auth.isAuthenticated && isUserDataLoading),
+        isLoading: auth.isLoading, // Only reflects Auth0's loading state
+        isUserDataLoading, // Explicitly expose our app's data loading state
         credits,
         isAdmin,
         loginWithRedirect: auth.loginWithRedirect,
