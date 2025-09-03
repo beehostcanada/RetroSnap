@@ -435,11 +435,11 @@ function App() {
                      />
                      <div className="w-full flex flex-col items-center gap-4">
                         <button onClick={handleGenerateTimeline} disabled={cannotGenerate} className={primaryButtonClasses}>
-                            Generate Timeline
+                            Generate Retro Timeline
                         </button>
                         {cannotGenerate && (
                             <p className="text-red-600 font-permanent-marker -mt-2 text-center">
-                                Out of credits!
+                                Sorry! Out of credits!
                             </p>
                         )}
 

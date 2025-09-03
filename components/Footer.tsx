@@ -24,7 +24,7 @@ const Footer = () => {
                                 onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                                 className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200"
                             >
-                                2Logout
+                                Logout
                             </button>
                         </div>
                     )}
@@ -49,7 +49,7 @@ const Footer = () => {
                         </>
                     )}
                     <p>
-                        2Original by{' '}
+                        Original by{' '}
                         <a
                             href="https://x.com/ammaar"
                             target="_blank"
@@ -61,7 +61,7 @@ const Footer = () => {
                     </p>
                     <span className="text-sky-400" aria-hidden="true">|</span>
                     <p>
-                        2Made more fun by{' '}
+                        Made more fun by{' '}
                         <a
                             href="https://ajbatac.github.io"
                             target="_blank"

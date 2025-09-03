@@ -10,7 +10,7 @@ const { AUTH0_DOMAIN, API_KEY, CONTEXT, ADMIN_EMAIL } = process.env;
 // Prioritize the Netlify-specific variable, but fall back to the generic one for wider compatibility.
 const DATABASE_URL = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
 const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com";
-const INITIAL_CREDITS = 10;
+const INITIAL_CREDITS = 36;
 
 // --- Database Pool Setup ---
 let pool: Pool;

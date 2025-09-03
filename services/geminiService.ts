@@ -236,6 +236,6 @@ export async function generateStyledImage(imageDataUrl: string, prompt: string, 
     } catch (error) {
         console.error("An unrecoverable error occurred during image generation.", error);
         const errorMessage = error instanceof Error ? error.message : String(error);
-        throw new Error(`The AI model failed to generate an image. Details: ${errorMessage}`);
+        throw new Error(`Sorry! ${errorMessage}`);
     }
 }
