@@ -84,6 +84,16 @@ export async function fetchUserData(token: string): Promise<{ isAdmin: boolean; 
 
 
 /**
+ * Fetches all user data for the admin panel.
+ * @param token The admin user's JWT.
+ * @returns A promise that resolves to an array of user objects.
+ */
+export async function getAllUsers(token: string): Promise<any[]> {
+    return apiFetch('/admin/users', token);
+}
+
+
+/**
  * Fetches debug information from the backend.
  * @param token The user's JWT.
  * @returns A promise that resolves to the debug info object.

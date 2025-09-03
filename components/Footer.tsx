@@ -10,8 +10,6 @@ import { useUserContext } from '../contexts/AuthContext';
 const Footer = () => {
     const { user, isAuthenticated, isLoading, isAdmin, logout } = useUserContext();
     
-    // This logic is now robust. The link will only be shown after all loading is complete
-    // and the user has been confirmed to be an admin.
     const showAdminLink = !isLoading && isAdmin;
 
     return (
@@ -36,6 +34,14 @@ const Footer = () => {
                 <div className="flex-grow flex justify-end items-center gap-4 sm:gap-6 text-white-500 whitespace-nowrap">
                     {isAuthenticated && (
                          <>
+                            {showAdminLink && (
+                                <>
+                                <Link to="/admin" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">
+                                    Admin
+                                </Link>
+                                <span className="text-sky-400" aria-hidden="true">|</span>
+                                </>
+                            )}
                             <Link to="/debug" className="font-bold text-white-700 hover:text-pink-500 transition-colors duration-200">
                                 Debug
                             </Link>
