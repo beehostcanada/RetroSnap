@@ -13,6 +13,7 @@ interface UserContextType {
     isAuthenticated: boolean;
     isLoading: boolean; // A single, derived loading state for consumers.
     status: Status; // The explicit state of the authentication and data-fetching process.
+    error: Error | null; // Holds authentication or data fetching errors.
     isAdmin: boolean;
     credits: number | null;
     loginWithRedirect: (options?: any) => Promise<void>;
@@ -43,47 +44,45 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
     const [credits, setCredits] = useState<number | null>(isMock ? auth.credits : null);
     const [isAdmin, setIsAdmin] = useState<boolean>(isMock ? auth.isAdmin : false);
     const [status, setStatus] = useState<Status>('pending');
+    const [error, setError] = useState<Error | null>(null);
 
     // This single effect orchestrates the entire session verification and data loading process,
     // making it resilient to the auth provider's race conditions.
     useEffect(() => {
-        // If we're in the mock dev environment, set success state immediately.
         if (isMock) {
             setStatus('success');
             return;
         }
 
-        // Only proceed when the Auth0 provider is no longer in its initial loading phase.
         if (!auth.isLoading) {
             const verifySessionAndFetchData = async () => {
-                // We are now verifying the session, so we enter our own loading state.
                 setStatus('loading');
+                setError(null); // Clear previous errors on a new attempt.
                 try {
-                    // This is the critical step. We actively try to get a token.
-                    // If the user is not logged in, this will throw an error and jump to the catch block.
-                    // This avoids relying on the potentially racy `isAuthenticated` flag from Auth0.
                     const token = await auth.getAccessTokenSilently();
-
-                    // If we get a token, the user is authenticated. Now fetch their specific data.
                     const data = await getCredits(token);
                     setCredits(data.credits);
                     setIsAdmin(data.isAdmin);
-                    setStatus('success'); // All data is loaded.
-                } catch (error) {
-                    // This catch block handles both "login required" errors from getAccessTokenSilently
-                    // and any potential network errors from our getCredits call.
-                    // In either case, we treat the user as logged out.
-                    console.log("Session verification or data fetch failed (user likely not logged in):", error);
+                    setStatus('success');
+                } catch (err: any) {
+                    console.error("Session verification or data fetch failed:", err);
                     setCredits(null);
                     setIsAdmin(false);
-                    // We have successfully determined the user is not logged in, so we move to the 'success'
-                    // state for a logged-out user. The UI can now render the login button.
-                    setStatus('success');
+
+                    // Distinguish between a user who isn't logged in vs. a real configuration error.
+                    // 'login_required' is a normal state, not an application error.
+                    if (err?.error === 'login_required') {
+                        setError(null);
+                        setStatus('success'); // Successfully determined user is logged out.
+                    } else {
+                        // Any other error is unexpected and should be surfaced to the user.
+                        setError(err as Error);
+                        setStatus('error');
+                    }
                 }
             };
             verifySessionAndFetchData();
         }
-        // This effect should run ONLY when Auth0's loading status changes.
     }, [auth.isLoading, auth.getAccessTokenSilently, isMock]);
 
 
@@ -99,16 +98,15 @@ export const UserProvider = ({ children, useAuthHook = useAuth0 }: UserProviderP
             setIsAdmin(data.isAdmin);
         } catch (error) {
             console.error("Manual user data refresh failed:", error);
-            // In a real app, you might show a toast notification here.
         }
     }, [isMock, auth.isAuthenticated, auth.getAccessTokenSilently]);
 
     const value: UserContextType = {
         user: auth.user,
         isAuthenticated: auth.isAuthenticated,
-        // The isLoading flag is now a reliable, single source of truth for the entire app.
         isLoading: status === 'pending' || status === 'loading',
         status,
+        error,
         credits,
         isAdmin,
         loginWithRedirect: auth.loginWithRedirect,

@@ -28,23 +28,42 @@ const LockIcon = () => (
 
 
 const AdminPage = () => {
-    const { isAuthenticated, isLoading, isAdmin } = useUserContext();
+    const { isAuthenticated, isLoading, isAdmin, error } = useUserContext();
     const navigate = useNavigate();
     const [isExpanded, setIsExpanded] = useState(true); // Keep the single item expanded by default
 
     useEffect(() => {
-        if (!isLoading && !isAuthenticated) {
+        if (!isLoading && !isAuthenticated && !error) {
             navigate('/');
         }
-    }, [isLoading, isAuthenticated, navigate]);
+    }, [isLoading, isAuthenticated, error, navigate]);
     
     const renderContent = () => {
-        // Use the single, reliable isLoading flag.
         if (isLoading) {
-            return <div className="text-center text-slate-400 text-lg animate-pulse">Loading Admin Panel...</div>;
+            return <div className="text-center text-slate-400 text-lg animate-pulse">Verifying Session...</div>;
         }
 
-        // This check now only happens *after* all loading is complete.
+        if (error) {
+            return (
+                <div className="text-center bg-red-900/50 border border-red-700 p-6 rounded-lg max-w-2xl">
+                    <h1 className="text-3xl font-bold mb-4 text-red-400">Authentication Error</h1>
+                    <p className="text-slate-300 mb-4">
+                        The application could not verify your session. This often happens when the Auth0 'Audience' setting doesn't match the API identifier configured in your Auth0 dashboard.
+                    </p>
+                    <p className="text-slate-400 text-sm mb-6">
+                        Please check the setup guide and ensure the Audience value in the code matches the Identifier for your API in Auth0.
+                    </p>
+                    <details className="text-left bg-slate-800 p-3 rounded">
+                        <summary className="cursor-pointer text-slate-300">Technical Details</summary>
+                        <pre className="text-xs text-slate-400 whitespace-pre-wrap mt-2">
+                            {error.message || 'No additional details provided.'}
+                        </pre>
+                    </details>
+                     <Link to="/" className="mt-6 inline-block text-teal-400 hover:text-teal-300 transition-colors">Go back to the homepage</Link>
+                </div>
+            );
+        }
+        
         if (!isAdmin) {
             return (
                 <div className="text-center">
