@@ -44,7 +44,6 @@ const Footer = () => {
                             )}
                         </>
                     )}
-                    <span className="text-sky-400" aria-hidden="true">|</span>
                     <p>
                         Made more fun by{' '}
                         <a
@@ -56,9 +55,10 @@ const Footer = () => {
                             @ajbatac
                         </a>
                     </p>
-                    <p>
+                    <span className="text-sky-400" aria-hidden="true">|</span>
+                    <p className="hover:text-grey-300">
                         Original by @ammaar
-                    </p>                    
+                    </p>          
                 </div>
             </div>
         </footer>
