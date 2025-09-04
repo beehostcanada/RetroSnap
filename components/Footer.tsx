@@ -20,6 +20,19 @@ const Footer = () => {
                     {isAuthenticated && user && (
                         <div className="flex items-center gap-4">
                              <p className="hidden sm:block text-white-950 font-bold">{user.email}</p>
+                             <span className="text-sky-400" aria-hidden="true">|</span>
+
+                            <a
+                            href="https://www.paypal.com/ncp/payment/E29Z2EWC657L4"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-white-700 hover:text-white-800"
+                            >
+                            Buy Credits
+                            </a>
+
+                            <span className="text-sky-400" aria-hidden="true">|</span>
+
                              <button
                                 onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                                 className="font-bold text-white-700 hover:text-red-500 transition-colors duration-200"

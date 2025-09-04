@@ -36,21 +36,7 @@ const GHOST_POLAROIDS_CONFIG = [
 const PayPalCreditButton = () => (
     <form action="https://www.paypal.com/ncp/payment/E29Z2EWC657L4" method="post" target="_blank" style={{display:'inline-grid', justifyItems:'center', alignContent:'start', gap:'0.5rem'}}>
         <input 
-            style={{
-                textAlign:'center',
-                border:'none',
-                borderRadius:'0.25rem',
-                minWidth:'11.625rem',
-                padding:'0 2rem',
-                height:'2.625rem',
-                fontWeight:'bold',
-                backgroundColor:'#FFD140',
-                color:'#000000',
-                fontFamily:'"Helvetica Neue",Arial,sans-serif',
-                fontSize:'1rem',
-                lineHeight:'1.25rem',
-                cursor:'pointer'
-            }} 
+            className="pp-E29Z2EWC657L4"
             type="submit" 
             value="Buy Credits" 
         />
