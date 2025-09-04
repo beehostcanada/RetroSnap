@@ -365,8 +365,13 @@ function App() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5 }}
-                    className="flex flex-col items-center gap-6 w-full"
+                    className="flex flex-col items-center gap-8 w-full max-w-xl px-4"
                 >
+                    <img
+                        src="https://wpeg.ca/retrosnap/1.png"
+                        alt="A collage of AI-generated retro-style photographs showing a person in different historical eras."
+                        className="w-full max-w-[500px] h-auto aspect-square object-cover rounded-lg shadow-xl border border-stone-200"
+                    />
                      <p className="font-permanent-marker text-stone-500 text-center max-w-sm text-lg">
                         Log in to start your journey through time and generate your own retro photo album.
                      </p>
